@@ -1,7 +1,79 @@
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { createWSClient } from "../lib/ws";
+import type { SuggestionFeedItem, WSMessage } from "@shared/types";
+
 export function Audience() {
+  const [params] = useSearchParams();
+  const sessionId = params.get("session") ?? "";
+  const [text, setText] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+  const [feed, setFeed] = useState<SuggestionFeedItem[]>([]);
+  const [error, setError] = useState("");
+  const wsRef = useRef<ReturnType<typeof createWSClient> | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const ws = createWSClient("audience", sessionId);
+    wsRef.current = ws;
+    ws.onMessage((msg: WSMessage) => {
+      if (msg.type === "suggestion_accepted") {
+        setFeed((f) => [{ text: msg.original, result: msg.result.label, timestamp: Date.now() }, ...f].slice(0, 20));
+      }
+      if (msg.type === "suggestion_rejected") setError(msg.reason);
+    });
+    return () => ws.close();
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+
+  const submit = () => {
+    if (!text.trim() || cooldown > 0) return;
+    wsRef.current?.send({ type: "suggestion", text: text.trim() });
+    setText("");
+    setError("");
+    setCooldown(15);
+  };
+
+  if (!sessionId) {
+    return <div className="w-full h-full flex items-center justify-center bg-saigon-dark"><p className="text-neon-red font-pixel text-sm">No session ID</p></div>;
+  }
+
   return (
-    <div className="w-full h-full flex items-center justify-center bg-saigon-dark">
-      <h1 className="text-neon-yellow text-xl font-pixel">AUDIENCE</h1>
+    <div className="w-full h-full flex flex-col bg-saigon-dark p-4 gap-4 overflow-hidden">
+      <h1 className="font-pixel text-neon-yellow text-xl text-center">SEND CHAOS</h1>
+      <div className="flex gap-2">
+        <input
+          className="flex-1 bg-saigon-road text-white px-3 py-2 rounded border border-neon-yellow/30 focus:border-neon-yellow outline-none"
+          placeholder="What should appear on the road?"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          maxLength={100}
+          disabled={cooldown > 0}
+        />
+        <button
+          className="bg-neon-yellow text-saigon-dark font-bold px-4 py-2 rounded disabled:opacity-40 font-pixel text-xs"
+          onClick={submit}
+          disabled={!text.trim() || cooldown > 0}
+        >
+          {cooldown > 0 ? `${cooldown}s` : "SEND"}
+        </button>
+      </div>
+      {error && <p className="text-neon-red text-xs">{error}</p>}
+      <div className="flex-1 overflow-y-auto flex flex-col gap-2">
+        {feed.map((item, i) => (
+          <div key={i} className="bg-saigon-road/60 rounded px-3 py-2">
+            <p className="text-white/50 text-xs">{item.text}</p>
+            <p className="text-neon-green text-sm">{item.result}</p>
+          </div>
+        ))}
+        {feed.length === 0 && <p className="text-white/30 text-center text-sm mt-8">No suggestions yet. Be the first!</p>}
+      </div>
     </div>
   );
 }
