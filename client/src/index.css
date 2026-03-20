@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --font-pixel: "Press Start 2P", monospace;
+  --font-body: "Nunito", sans-serif;
+  --color-saigon-dark: #0a0a0f;
+  --color-saigon-road: #2a2a3a;
+  --color-saigon-lane: #3a3a4a;
+  --color-saigon-sky: #1a1a2e;
+  --color-neon-green: #00ff88;
+  --color-neon-red: #ff4444;
+  --color-neon-yellow: #ffdd00;
+  --color-neon-cyan: #00ddff;
+}
+
+body {
+  margin: 0;
+  background: var(--color-saigon-dark);
+  color: white;
+  font-family: var(--font-body);
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+}

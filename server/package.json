@@ -1,0 +1,12 @@
+{
+  "name": "saigon-rush-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "openai": "^4.73.0"
+  }
+}
