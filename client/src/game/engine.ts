@@ -165,6 +165,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
           state.shakeTimer = 0.2;
           state.shakeIntensity = 8;
           state.hitFlashTimer = 0.1;
+          audio.silenceAll(); // Nuclear reset: kill any lingering sounds
           audio.playCrash();
           // Hit particles
           for (let i = 0; i < 8; i++) {
