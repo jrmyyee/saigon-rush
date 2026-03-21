@@ -32,8 +32,9 @@ export interface GameObstacle {
   movement?: "straight" | "weave" | "drift";
   spriteData?: Array<{ x: number; y: number; w: number; h: number; c: string }>;
   soundCategory?: "animal" | "vehicle" | "food" | "explosion" | "music" | "human" | "machine";
-  imageUrl?: string;  // fal.ai generated sprite image URL
+  imageUrl?: string;  // DALL-E 3 generated sprite image URL
   announcementAudio?: string;  // base64 encoded audio from ElevenLabs
+  soundEffectAudio?: string;  // base64 ElevenLabs generated sound effect
 }
 
 export interface GameState {

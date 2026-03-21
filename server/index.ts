@@ -1,6 +1,5 @@
 // Saigon Rush — Bun WebSocket Server
 import OpenAI from "openai";
-import { fal } from "@fal-ai/client";
 import type { ServerWebSocket } from "bun";
 import type { ClientRole, GameObstacle, WSMessage } from "../shared/types";
 import { OBSTACLE_JSON_SCHEMA, OPENAI_SYSTEM_PROMPT } from "../shared/types";
@@ -9,7 +8,6 @@ const PORT = parseInt(process.env.PORT || "8080");
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 const RATE_LIMIT_MS = 15_000;
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-fal.config({ credentials: process.env.FAL_KEY });
 
 interface SocketData { sessionId: string; role: ClientRole; id: string }
 interface Session {
@@ -78,19 +76,40 @@ async function generateAnnouncement(displayName: string): Promise<string | undef
   }
 }
 
-async function generateSpriteImage(displayName: string, color: string): Promise<string | undefined> {
+async function generateSpriteImage(displayName: string): Promise<string | undefined> {
   try {
-    const result = await fal.subscribe("fal-ai/flux/schnell", {
-      input: {
-        prompt: `pixel art game sprite, side view, ${displayName}, retro 16-bit style, clean pixel edges, vibrant saturated colors, solid white background, no shadow, centered in frame, game asset`,
-        image_size: { width: 256, height: 256 },
-        num_images: 1,
-        num_inference_steps: 4,
-      },
+    const response = await openai.images.generate({
+      model: "dall-e-3",
+      prompt: `Pixel art game sprite of ${displayName}, side view, 16-bit retro style, single character or object centered on frame, solid black background, clean pixel edges, vibrant saturated colors, game asset style, no text no labels no UI`,
+      n: 1,
+      size: "1024x1024",
+      quality: "standard",
     });
-    return (result as any)?.data?.images?.[0]?.url || (result as any)?.images?.[0]?.url;
+    return response.data[0]?.url;
   } catch (err) {
-    console.error("[fal.ai] Failed:", err);
+    console.error("[dalle] Failed:", err);
+    return undefined;
+  }
+}
+
+async function generateSoundEffect(displayName: string, audienceMessage: string): Promise<string | undefined> {
+  try {
+    const response = await fetch("https://api.elevenlabs.io/v1/sound-generation", {
+      method: "POST",
+      headers: {
+        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: `${displayName} sound effect: ${audienceMessage.slice(0, 100)}`,
+        duration_seconds: 1.5,
+      }),
+    });
+    if (!response.ok) throw new Error(`ElevenLabs SFX ${response.status}`);
+    const buffer = await response.arrayBuffer();
+    return Buffer.from(buffer).toString("base64");
+  } catch (err) {
+    console.error("[elevenlabs-sfx] Failed:", err);
     return undefined;
   }
 }
@@ -110,10 +129,11 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
     if (!content) throw new Error("Empty OpenAI response");
     const parsed = JSON.parse(content);
 
-    // Fire fal.ai and ElevenLabs in parallel (non-blocking)
-    const [imageUrl, announcementAudio] = await Promise.all([
-      generateSpriteImage(parsed.displayName, parsed.color).catch(() => undefined),
+    // Fire DALL-E, ElevenLabs TTS, and ElevenLabs SFX in parallel (non-blocking)
+    const [imageUrl, announcementAudio, soundEffectAudio] = await Promise.all([
+      generateSpriteImage(parsed.displayName).catch(() => undefined),
       generateAnnouncement(parsed.displayName).catch(() => undefined),
+      generateSoundEffect(parsed.displayName, parsed.audienceMessage || "").catch(() => undefined),
     ]);
 
     return {
@@ -133,6 +153,7 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
       soundCategory: parsed.soundCategory,
       imageUrl,
       announcementAudio,
+      soundEffectAudio,
     };
   } catch (err) {
     console.error("[openai] Failed:", err);
@@ -168,8 +189,6 @@ const server = Bun.serve<SocketData>({
       if (role === "display") {
         session.display = ws;
         ws.subscribe(`audience:${sessionId}`);
-        // Warm up fal.ai model
-        generateSpriteImage("test obstacle", "#ff0000").catch(() => {});
       } else if (role === "controller") {
         session.controller = ws;
       } else {

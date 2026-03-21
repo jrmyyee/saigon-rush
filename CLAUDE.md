@@ -15,10 +15,21 @@
 - Reference `task_plan.md` before starting any phase
 
 ### 2. Subagent Strategy
-- Use subagents liberally to keep main context window clean
-- Offload research, exploration, and parallel analysis to subagents
-- For complex problems, throw more compute at it via subagents
+- Use SPECIALIZED agents, not generic ones:
+  - `feature-dev:code-explorer` for understanding codebase before changes
+  - `feature-dev:code-architect` for designing implementations
+  - `feature-dev:code-reviewer` for auditing code quality
+  - `Explore` (subagent_type) for quick file/pattern searches
+- Before ANY code changes, explore the relevant files with a code-explorer agent
+- Every implementation agent MUST read the full file before modifying it
+- Never assume file contents — always read first, then edit
 - One task per subagent for focused execution
+- Offload research, exploration, and parallel analysis to subagents
+
+### 2b. New Features Require Planning
+- Any new feature or significant change MUST go through plan mode first
+- Explore → Plan → Implement → Review → Verify
+- No cowboy coding — even under hackathon time pressure, 10 minutes of planning saves hours of debugging
 
 ### 3. Self-Improvement Loop
 - After ANY correction from the user: update `tasks/lessons.md` with the pattern

@@ -249,6 +249,10 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
         if (w.obstacle.soundCategory) {
           audio.playCategorySound(w.obstacle.soundCategory);
         }
+        // Play ElevenLabs SFX if available
+        if (w.obstacle.soundEffectAudio) {
+          audio.playSoundEffect(w.obstacle.soundEffectAudio);
+        }
       }
     }
     state.pendingWarnings = state.pendingWarnings.filter((w) => w.timer > 0);
@@ -703,14 +707,14 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
 
     addObstacle(obstacle: GameObstacle) {
       if (obstacle.fromAudience) {
-        // Preload fal.ai image during the 2-second warning phase
+        // Preload fal.ai image during the 3.5-second warning phase
         if (obstacle.imageUrl) {
           preloadObstacleImage(obstacle.imageUrl);
         }
-        // Telegraph: 2-second warning before spawning
+        // Telegraph: 3.5-second warning before spawning (gives DALL-E time to generate image)
         state.pendingWarnings.push({
           obstacle,
-          timer: 2.0,
+          timer: 3.5,
           lane: obstacle.lane,
           tickerX: CANVAS_W,
           sirenTimer: 0,

@@ -11,6 +11,7 @@ export class AudioManager {
   private musicPlaying = false;
   private musicTimeouts: number[] = [];
   private activeNodes: Array<AudioNode> = []; // Track for cleanup
+  private activeTimeouts: Set<number> = new Set(); // Track scheduled cleanups for emergency teardown
 
   init(): void {
     if (this.ctx) {
@@ -44,7 +45,7 @@ export class AudioManager {
     this.engineOsc.type = "sawtooth";
     this.engineOsc.frequency.value = 85;
     this.engineGain = ctx.createGain();
-    this.engineGain.gain.value = 0.08;
+    this.engineGain.gain.value = 0.04;
     this.engineOsc.connect(this.engineGain);
     this.engineGain.connect(this.masterGain!);
     this.engineOsc.start();
@@ -66,7 +67,7 @@ export class AudioManager {
     const freq = 80 + (speed / 800) * 60;
     this.engineOsc.frequency.value = freq;
     if (this.engineGain) {
-      this.engineGain.gain.value = Math.min(0.15, 0.06 + (speed / 800) * 0.09);
+      this.engineGain.gain.value = Math.min(0.10, 0.04 + (speed / 800) * 0.06);
     }
   }
 
@@ -85,8 +86,15 @@ export class AudioManager {
     gain.connect(this.sfxGain);
     osc.start(now);
     osc.stop(now + duration + 0.02);
-    // Auto-cleanup
+    // Early cleanup via onended (belt)
     osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch {} };
+    // Proactive setTimeout cleanup (suspenders) — guarantees no zombie oscillators
+    const cleanupMs = (duration + 0.2) * 1000;
+    const tid = setTimeout(() => {
+      this.activeTimeouts.delete(tid);
+      try { osc.disconnect(); gain.disconnect(); } catch {}
+    }, cleanupMs) as unknown as number;
+    this.activeTimeouts.add(tid);
   }
 
   private playNoiseBurst(vol: number, duration: number, filterFreq?: number): void {
@@ -102,8 +110,9 @@ export class AudioManager {
     const g = ctx.createGain();
     g.gain.setValueAtTime(Math.max(0.005, vol), now);
     g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    let filter: BiquadFilterNode | null = null;
     if (filterFreq) {
-      const filter = ctx.createBiquadFilter();
+      filter = ctx.createBiquadFilter();
       filter.type = filterFreq > 1000 ? "highpass" : "lowpass";
       filter.frequency.value = filterFreq;
       src.connect(filter);
@@ -114,41 +123,68 @@ export class AudioManager {
     g.connect(this.sfxGain);
     src.start(now);
     src.stop(now + duration + 0.02);
-    src.onended = () => { try { src.disconnect(); g.disconnect(); } catch {} };
+    // Early cleanup via onended (belt)
+    src.onended = () => { try { src.disconnect(); g.disconnect(); if (filter) filter.disconnect(); } catch {} };
+    // Proactive setTimeout cleanup (suspenders)
+    const cleanupMs = (duration + 0.2) * 1000;
+    const tid = setTimeout(() => {
+      this.activeTimeouts.delete(tid);
+      try { src.disconnect(); g.disconnect(); if (filter) filter.disconnect(); } catch {}
+    }, cleanupMs) as unknown as number;
+    this.activeTimeouts.add(tid);
   }
 
   playCrash(): void {
     const ctx = this.ensureContext();
     if (!ctx || !this.sfxGain) return;
     const now = ctx.currentTime;
-    // Noise burst
-    const bufferSize = Math.floor(ctx.sampleRate * 0.12);
+    // Noise burst (shortened: 0.10s, lowered vol: 0.2)
+    const noiseDuration = 0.10;
+    const bufferSize = Math.floor(ctx.sampleRate * noiseDuration);
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
     const noise = ctx.createBufferSource();
     noise.buffer = buffer;
     const ng = ctx.createGain();
-    ng.gain.setValueAtTime(0.25, now);
-    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    ng.gain.setValueAtTime(0.2, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + noiseDuration);
     noise.connect(ng);
     ng.connect(this.sfxGain);
     noise.start(now);
-    noise.stop(now + 0.13);
+    noise.stop(now + noiseDuration + 0.01);
+    // Early cleanup via onended (belt)
     noise.onended = () => { try { noise.disconnect(); ng.disconnect(); } catch {} };
-    // Descending thud
+    // Proactive setTimeout cleanup for noise (suspenders)
+    const noiseCleanupMs = (noiseDuration + 0.2) * 1000;
+    const noiseTid = setTimeout(() => {
+      this.activeTimeouts.delete(noiseTid);
+      try { noise.disconnect(); ng.disconnect(); } catch {}
+    }, noiseCleanupMs) as unknown as number;
+    this.activeTimeouts.add(noiseTid);
+
+    // Descending thud (shortened: 0.12s, lowered vol: 0.1)
+    const oscDuration = 0.12;
     const osc = ctx.createOscillator();
     osc.type = "square";
     osc.frequency.setValueAtTime(250, now);
-    osc.frequency.exponentialRampToValueAtTime(60, now + 0.15);
+    osc.frequency.exponentialRampToValueAtTime(60, now + oscDuration);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.12, now);
-    og.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    og.gain.setValueAtTime(0.1, now);
+    og.gain.exponentialRampToValueAtTime(0.001, now + oscDuration);
     osc.connect(og);
     og.connect(this.sfxGain);
     osc.start(now);
-    osc.stop(now + 0.16);
+    osc.stop(now + oscDuration + 0.01);
+    // Early cleanup via onended (belt)
     osc.onended = () => { try { osc.disconnect(); og.disconnect(); } catch {} };
+    // Proactive setTimeout cleanup for oscillator (suspenders)
+    const oscCleanupMs = (oscDuration + 0.2) * 1000;
+    const oscTid = setTimeout(() => {
+      this.activeTimeouts.delete(oscTid);
+      try { osc.disconnect(); og.disconnect(); } catch {}
+    }, oscCleanupMs) as unknown as number;
+    this.activeTimeouts.add(oscTid);
   }
 
   playDodge(): void {
@@ -215,6 +251,18 @@ export class AudioManager {
       const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
       audio.volume = 0.6;
       audio.play().catch(() => {}); // Ignore autoplay errors
+    } catch {
+      // Silently ignore
+    }
+  }
+
+  // ── ElevenLabs Sound Effect Audio ──────────────────────
+  playSoundEffect(base64Audio: string): void {
+    if (!base64Audio) return;
+    try {
+      const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
+      audio.volume = 0.5;
+      audio.play().catch(() => {});
     } catch {
       // Silently ignore
     }
@@ -309,9 +357,23 @@ export class AudioManager {
     this.musicTimeouts.push(loopTid);
   }
 
+  /** Nuclear option: disconnect sfxGain momentarily to kill any stuck sounds, then reconnect */
+  silenceAll(): void {
+    if (!this.sfxGain || !this.masterGain) return;
+    try { this.sfxGain.disconnect(); } catch {}
+    // Clear all proactive cleanup timeouts
+    for (const tid of this.activeTimeouts) clearTimeout(tid);
+    this.activeTimeouts.clear();
+    // Reconnect sfxGain so future sounds work
+    this.sfxGain.connect(this.masterGain);
+  }
+
   destroy(): void {
     this.stopEngine();
     this.stopMusic();
+    // Clear all proactive cleanup timeouts
+    for (const tid of this.activeTimeouts) clearTimeout(tid);
+    this.activeTimeouts.clear();
     this.sfxGain?.disconnect();
     this.sfxGain = null;
     if (this.ctx) {
