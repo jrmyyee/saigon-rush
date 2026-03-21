@@ -31,15 +31,16 @@ export function GameScreen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameAPI | null>(null);
   const navigate = useNavigate();
-  const [phase, setPhase] = useState<"waiting" | "playing" | "game_over">("waiting");
+  const [phase, setPhase] = useState<"lobby" | "playing" | "game_over">("lobby");
   const [feed, setFeed] = useState<SuggestionFeedItem[]>([]);
+  const [audienceCount, setAudienceCount] = useState(0);
   const [topVoted, setTopVoted] = useState<{ label: string; votes: number; color: string } | null>(null);
+  const wsRef = useRef<ReturnType<typeof createWSClient> | null>(null);
 
   const baseUrl = window.location.origin;
-  const controlUrl = `${baseUrl}/control?session=${sessionId}`;
   const audienceUrl = `${baseUrl}/audience?session=${sessionId}`;
 
-  // Mount game engine when canvas is available and phase is playing
+  // Mount game engine when phase is playing
   useEffect(() => {
     if (phase !== "playing" || !canvasRef.current || gameRef.current) return;
     const game = createGame(canvasRef.current, {
@@ -53,10 +54,14 @@ export function GameScreen() {
     return () => { game.destroy(); gameRef.current = null; };
   }, [phase, navigate, testMode]);
 
+  // WebSocket connection — stays alive across lobby → playing
   useEffect(() => {
     const ws = createWSClient("display", sessionId);
+    wsRef.current = ws;
     ws.onMessage((msg: any) => {
-      if (msg.type === "player_joined" && msg.role === "controller") setPhase("playing");
+      if (msg.type === "audience_count") {
+        setAudienceCount(msg.count);
+      }
       if (msg.type === "input" && gameRef.current) {
         gameRef.current.handleInput(msg.action);
       }
@@ -72,18 +77,9 @@ export function GameScreen() {
           color: msg.result.color,
         }, ...f].slice(0, 5));
       }
-      // Claude Opus high-quality sprite arrived (progressive enhancement)
       if (msg.type === "obstacle_sprite_ready" && gameRef.current) {
         gameRef.current.updateObstacleSpriteData(msg.obstacleId, msg.spriteData, msg.obstacleType);
       }
-      // Vote update — track audience favorite
-      if (msg.type === "vote_update") {
-        const sorted = [...msg.votes].sort((a: any, b: any) => b.votes - a.votes);
-        if (sorted[0]?.votes > 0) {
-          setTopVoted({ label: sorted[0].label, votes: sorted[0].votes, color: sorted[0].color });
-        }
-      }
-      // ElevenLabs SFX arrived
       if (msg.type === "obstacle_sfx_ready" && gameRef.current) {
         try {
           const audio = new Audio(`data:audio/mpeg;base64,${msg.soundEffectAudio}`);
@@ -91,60 +87,128 @@ export function GameScreen() {
           audio.play().catch(() => {});
         } catch {}
       }
+      if (msg.type === "vote_update") {
+        const sorted = [...msg.votes].sort((a: any, b: any) => b.votes - a.votes);
+        if (sorted[0]?.votes > 0) {
+          setTopVoted({ label: sorted[0].label, votes: sorted[0].votes, color: sorted[0].color });
+        }
+      }
     });
     return () => ws.close();
   }, [sessionId]);
 
-  // Also support keyboard directly on the game screen for testing
+  // Keyboard controls during gameplay
   useEffect(() => {
-    if (phase !== "playing" && phase !== "waiting") return;
+    if (phase !== "playing") return;
     const onKey = (e: KeyboardEvent) => {
-      // Start game on any key if waiting
-      if (phase === "waiting") {
-        setPhase("playing");
-        return;
-      }
       if (!gameRef.current) return;
-      if (e.key === "ArrowUp" || e.key === "w") gameRef.current.handleInput("lane_up");
-      else if (e.key === "ArrowDown" || e.key === "s") gameRef.current.handleInput("lane_down");
+      if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") gameRef.current.handleInput("lane_up");
+      else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") gameRef.current.handleInput("lane_down");
       else if (e.key === " ") { e.preventDefault(); gameRef.current.handleInput("boost"); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [phase]);
 
-  if (phase === "waiting") {
+  // ── LOBBY SCREEN ──────────────────────────────────────────
+  if (phase === "lobby") {
     return (
-      <div
-        className="w-full h-full flex flex-col items-center justify-center gap-6 bg-saigon-dark cursor-pointer"
-        onClick={() => setPhase("playing")}
-      >
-        <h1 className="font-pixel text-neon-green text-3xl md:text-5xl tracking-wider">SAIGON RUSH</h1>
-        {testMode && <p className="text-neon-red font-pixel text-xs">TEST MODE — INFINITE LIVES</p>}
-        <p className="text-white/60 font-pixel text-xs">Session: {sessionId}</p>
-        <div className="flex gap-8">
-          <div className="flex flex-col items-center gap-2">
-            <QRCodeSVG value={controlUrl} size={160} bgColor="#0a0a0f" fgColor="#00ff88" />
-            <span className="text-neon-green font-pixel text-[10px]">PLAYER</span>
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <QRCodeSVG value={audienceUrl} size={160} bgColor="#0a0a0f" fgColor="#ffdd00" />
-            <span className="text-neon-yellow font-pixel text-[10px]">AUDIENCE</span>
-          </div>
+      <div className="w-full h-full flex flex-col bg-saigon-dark overflow-hidden relative">
+        {/* Animated road background */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {/* Road surface */}
+          <div className="absolute bottom-0 left-0 right-0 h-[40%] bg-[#222230]" />
+          {/* Lane dividers (animated) */}
+          <div className="absolute bottom-[32%] left-0 right-0 h-[2px] bg-[#555555] opacity-40" />
+          <div className="absolute bottom-[20%] left-0 right-0 h-[2px] bg-[#555555] opacity-40" />
+          {/* Center line */}
+          <div className="absolute bottom-[26%] left-0 right-0 h-[2px]"
+            style={{ background: "repeating-linear-gradient(90deg, #ccaa22 0px, #ccaa22 24px, transparent 24px, transparent 40px)" }} />
+          {/* Skyline silhouette */}
+          <div className="absolute bottom-[40%] left-0 right-0 h-[20%]"
+            style={{ background: "linear-gradient(to top, #0e0e22, transparent)" }} />
+          {/* Neon glow strips */}
+          <div className="absolute top-[15%] left-[10%] w-[20%] h-[3px] bg-neon-green/20 blur-sm" />
+          <div className="absolute top-[20%] right-[15%] w-[15%] h-[3px] bg-neon-yellow/20 blur-sm" />
+          <div className="absolute top-[25%] left-[30%] w-[10%] h-[2px] bg-neon-red/20 blur-sm" />
         </div>
-        <p className="text-white/40 font-pixel text-xs animate-pulse">
-          Click anywhere, press any key, or scan QR to start
-        </p>
+
+        {/* Content */}
+        <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-6 px-8">
+          {/* Title */}
+          <div className="text-center">
+            <h1 className="font-pixel text-neon-green text-5xl md:text-7xl tracking-wider drop-shadow-[0_0_30px_rgba(0,255,136,0.3)]">
+              SAIGON RUSH
+            </h1>
+            <p className="text-neon-yellow font-pixel text-sm md:text-base mt-2 tracking-wide">
+              SURVIVE HO CHI MINH CITY TRAFFIC
+            </p>
+          </div>
+
+          {/* Main card — QR + info */}
+          <div className="flex flex-col md:flex-row items-center gap-8 bg-black/60 border border-neon-green/20 rounded-lg px-8 py-6 backdrop-blur-sm max-w-2xl">
+            {/* QR Code */}
+            <div className="flex flex-col items-center gap-3">
+              <QRCodeSVG value={audienceUrl} size={180} bgColor="#0a0a0f" fgColor="#ffdd00" />
+              <p className="text-neon-yellow font-pixel text-[10px] tracking-wider">SCAN TO JOIN</p>
+            </div>
+
+            {/* Info panel */}
+            <div className="flex flex-col gap-4 text-center md:text-left">
+              <div>
+                <p className="text-white/40 text-xs mb-1">HOW IT WORKS</p>
+                <p className="text-white/80 text-sm leading-relaxed">
+                  You dodge traffic on the big screen.<br />
+                  The audience designs the obstacles.<br />
+                  <span className="text-neon-yellow">Type anything</span> — it appears on the road.
+                </p>
+              </div>
+
+              {/* Audience counter */}
+              <div className="flex items-center gap-3">
+                <div className={`w-3 h-3 rounded-full ${audienceCount > 0 ? "bg-neon-green animate-pulse" : "bg-white/20"}`} />
+                <span className="text-white text-lg font-pixel">
+                  {audienceCount === 0 ? "Waiting for audience..." : `${audienceCount} ${audienceCount === 1 ? "player" : "players"} joined`}
+                </span>
+              </div>
+
+              {/* Session code */}
+              <p className="text-white/30 text-xs font-mono">Room: {sessionId}</p>
+            </div>
+          </div>
+
+          {/* START button */}
+          <button
+            onClick={() => setPhase("playing")}
+            className="group relative px-12 py-4 font-pixel text-2xl tracking-wider transition-all duration-200 hover:scale-105 active:scale-95"
+          >
+            {/* Glow background */}
+            <div className="absolute inset-0 bg-neon-green/20 rounded-lg blur-xl group-hover:bg-neon-green/30 transition-colors" />
+            {/* Button body */}
+            <div className="relative bg-neon-green text-saigon-dark rounded-lg px-12 py-4 border-2 border-neon-green shadow-[0_0_20px_rgba(0,255,136,0.3)] group-hover:shadow-[0_0_40px_rgba(0,255,136,0.5)]">
+              START GAME
+            </div>
+          </button>
+
+          {testMode && <p className="text-neon-red font-pixel text-xs">TEST MODE — INFINITE LIVES</p>}
+
+          {/* Bottom hint */}
+          <p className="text-white/20 text-xs">
+            W/S or Arrow keys to dodge
+          </p>
+        </div>
       </div>
     );
   }
 
+  // ── GAMEPLAY SCREEN ───────────────────────────────────────
   return (
     <div className="w-full h-full flex bg-saigon-dark">
       <div className="flex-1 flex items-center justify-center relative scanlines">
         <canvas ref={canvasRef} width={960} height={640} className="max-w-full max-h-full border-2 border-neon-green/40 shadow-[0_0_40px_rgba(0,255,136,0.15)]" style={{ imageRendering: "pixelated" }} />
-        <div className="absolute bottom-2 left-2 bg-saigon-dark/80 px-2 py-1 rounded">
-          <p className="text-white/40 text-[9px] font-pixel">AUDIENCE: {audienceUrl.replace(window.location.origin, '...')}</p>
+        <div className="absolute bottom-2 left-2 bg-saigon-dark/80 px-2 py-1 rounded flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${audienceCount > 0 ? "bg-neon-green" : "bg-white/20"}`} />
+          <p className="text-white/40 text-[9px] font-pixel">{audienceCount} watching</p>
         </div>
       </div>
       <div className="w-56 bg-saigon-sky/80 p-3 flex flex-col gap-2 overflow-hidden">

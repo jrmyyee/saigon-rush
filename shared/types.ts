@@ -18,7 +18,8 @@ export type WSMessage =
   | { type: "obstacle_image_ready"; obstacleId: string; imageUrl: string }
   | { type: "obstacle_sfx_ready"; obstacleId: string; soundEffectAudio: string }
   | { type: "vote"; obstacleId: string }
-  | { type: "vote_update"; votes: Array<{ id: string; label: string; color: string; votes: number }> };
+  | { type: "vote_update"; votes: Array<{ id: string; label: string; color: string; votes: number }> }
+  | { type: "audience_count"; count: number };
 
 export type InputAction = "lane_up" | "lane_down" | "boost";
 

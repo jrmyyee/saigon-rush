@@ -357,6 +357,8 @@ const server = Bun.serve<SocketData>({
 
       console.log(`[${role}] connected to session ${sessionId}`);
       pub(`game:${sessionId}`, { type: "player_joined", role });
+      // Broadcast audience count on every join
+      pub(`game:${sessionId}`, { type: "audience_count", count: session.audience.length });
     },
 
     async message(ws, message) {
@@ -459,7 +461,10 @@ const server = Bun.serve<SocketData>({
       if (session) {
         if (role === "display") { sessions.delete(sessionId); console.log(`[session] ${sessionId} cleaned up`); }
         else if (role === "controller") session.controller = null;
-        else session.audience = session.audience.filter((s) => s !== ws);
+        else {
+          session.audience = session.audience.filter((s) => s !== ws);
+          pub(`game:${sessionId}`, { type: "audience_count", count: session.audience.length });
+        }
       }
       console.log(`[${role}] disconnected from session ${sessionId}`);
       pub(`game:${sessionId}`, { type: "player_left", role });
