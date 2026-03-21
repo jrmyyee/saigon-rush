@@ -84,7 +84,7 @@ function createState(): InternalState {
     road: createRoadState(),
     baseSpeed: 300,
     elapsed: 0,
-    spawnTimer: 0,
+    spawnTimer: 3, // 3-second grace period — no obstacles at start
     dustTimer: 0,
     speedLineTimer: 0,
     frameCount: 0,
@@ -472,6 +472,9 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       case "magnet":
         state.powerups.magnetCharges = 3; // Auto-dodge next 3 obstacles (legacy)
         break;
+      case "heal":
+        state.player.hp = Math.min(state.player.maxHp, state.player.hp + 1);
+        break;
       case "mega_honk":
         // MEGA HONK: push all on-screen obstacles away with a blast
         audio.playMegaHonk();
@@ -504,10 +507,11 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     state.powerupSpawnTimer -= dt;
     if (state.powerupSpawnTimer <= 0) {
       state.powerupSpawnTimer = 12 + Math.random() * 8;
-      const types: Array<{ type: "shield" | "speed_boost" | "mega_honk"; label: string; color: string }> = [
+      const types: Array<{ type: "shield" | "speed_boost" | "mega_honk" | "heal"; label: string; color: string }> = [
         { type: "shield", label: "\ud83d\udee1\ufe0f Shield", color: "#00ff88" },
         { type: "speed_boost", label: "\u26a1 Speed!", color: "#ff8800" },
         { type: "mega_honk", label: "\ud83d\udce2 MEGA HONK", color: "#ffaa00" },
+        { type: "heal", label: "\u2764\ufe0f +1 Life", color: "#ff4488" },
       ];
       const pick = types[Math.floor(Math.random() * types.length)];
       const lane = (Math.floor(Math.random() * 3)) as 0 | 1 | 2;
@@ -711,19 +715,54 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       // HUD (drawn after post-processing so it's crisp)
       drawHUD(ctx, state);
 
-      // "SURVIVE THE TRAFFIC!" objective text (first 3 seconds, fades out)
-      if (state.elapsed < 3) {
-        const fadeAlpha = state.elapsed < 2 ? 1 : 1 - (state.elapsed - 2);
-        ctx.globalAlpha = fadeAlpha;
-        // Glow behind text
-        ctx.fillStyle = "#00000088";
-        ctx.fillRect(CANVAS_W / 2 - 200, CANVAS_H / 2 - 30, 400, 50);
-        ctx.fillStyle = "#ffcc00";
-        ctx.font = "bold 28px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("SURVIVE THE TRAFFIC!", CANVAS_W / 2, CANVAS_H / 2 + 2);
-        ctx.textAlign = "left";
-        ctx.globalAlpha = 1;
+      // Cinematic intro sequence (first 3 seconds)
+      if (state.elapsed < 3.5) {
+        const t = state.elapsed;
+        // Phase 1 (0-1s): Title slam
+        if (t < 1.2) {
+          const scale = t < 0.15 ? t / 0.15 : 1; // Slam in over 150ms
+          const alpha = t < 0.15 ? t / 0.15 : 1;
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = "#000000aa";
+          ctx.fillRect(CANVAS_W / 2 - 240, CANVAS_H / 2 - 50, 480, 90);
+          ctx.fillStyle = "#00ff88";
+          ctx.font = `bold ${Math.floor(36 * scale)}px monospace`;
+          ctx.textAlign = "center";
+          ctx.fillText("SAIGON RUSH", CANVAS_W / 2, CANVAS_H / 2 - 10);
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = "bold 16px monospace";
+          ctx.fillText("SURVIVE THE TRAFFIC!", CANVAS_W / 2, CANVAS_H / 2 + 22);
+          ctx.textAlign = "left";
+          ctx.globalAlpha = 1;
+        }
+        // Phase 2 (1.2-2.5s): "3... 2... 1..." countdown
+        else if (t < 2.7) {
+          const countT = t - 1.2;
+          const num = countT < 0.5 ? "3" : countT < 1.0 ? "2" : "1";
+          const beatT = countT % 0.5; // time within each beat
+          const beatScale = 1 + (1 - beatT / 0.3) * 0.4; // Punch in, settle
+          const alpha = beatT < 0.4 ? 1 : 1 - (beatT - 0.4) / 0.1;
+          ctx.globalAlpha = Math.max(0, alpha);
+          ctx.fillStyle = "#ffcc00";
+          ctx.font = `bold ${Math.floor(64 * Math.min(beatScale, 1.4))}px monospace`;
+          ctx.textAlign = "center";
+          ctx.fillText(num, CANVAS_W / 2, CANVAS_H / 2 + 20);
+          ctx.textAlign = "left";
+          ctx.globalAlpha = 1;
+        }
+        // Phase 3 (2.7-3.5s): "GO!" flash
+        else {
+          const goT = t - 2.7;
+          const alpha = 1 - goT / 0.8;
+          const scale = 1 + goT * 0.5;
+          ctx.globalAlpha = Math.max(0, alpha);
+          ctx.fillStyle = "#00ff88";
+          ctx.font = `bold ${Math.floor(72 * scale)}px monospace`;
+          ctx.textAlign = "center";
+          ctx.fillText("GO!", CANVAS_W / 2, CANVAS_H / 2 + 20);
+          ctx.textAlign = "left";
+          ctx.globalAlpha = 1;
+        }
       }
 
       // Announcement banners for audience-spawned obstacles
@@ -735,6 +774,17 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
         const fadeOut = a.timer < 0.5 ? a.timer / 0.5 : 1;
         const yOffset = -60 + slideIn * 60 + i * 56;
         ctx.globalAlpha = fadeOut;
+        // Measure description to fit — wrap or truncate
+        ctx.font = "11px monospace";
+        const desc = a.description;
+        const maxDescW = 400;
+        let descLine = desc;
+        if (ctx.measureText(desc).width > maxDescW) {
+          // Truncate with ellipsis at character level
+          let fit = desc;
+          while (fit.length > 10 && ctx.measureText(fit + "...").width > maxDescW) fit = fit.slice(0, -1);
+          descLine = fit + "...";
+        }
         // Banner background
         ctx.fillStyle = "#000000cc";
         ctx.fillRect(CANVAS_W / 2 - 220, 76 + yOffset, 440, 48);
@@ -750,7 +800,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
         // Description
         ctx.fillStyle = "#ffffff99";
         ctx.font = "11px monospace";
-        ctx.fillText(a.description.slice(0, 50), CANVAS_W / 2, 116 + yOffset);
+        ctx.fillText(descLine, CANVAS_W / 2, 116 + yOffset);
         ctx.textAlign = "left";
         ctx.globalAlpha = 1;
       }

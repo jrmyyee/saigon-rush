@@ -52,7 +52,7 @@ export interface GameObstacle {
 
   // ── Engine-only fields (not in AI schema) ─────────────────
   isPowerup?: boolean;
-  powerupType?: "shield" | "speed_boost" | "magnet" | "mega_honk";
+  powerupType?: "shield" | "speed_boost" | "magnet" | "mega_honk" | "heal";
 
   // ── AI-generated assets ───────────────────────────────────
   spriteData?: Array<{ x: number; y: number; w: number; h: number; c: string }>;

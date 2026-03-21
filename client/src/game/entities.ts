@@ -55,8 +55,8 @@ export function createPlayer(): Player {
     lane: 1,
     y: LANE_Y[1],
     targetY: LANE_Y[1],
-    hp: 3,
-    maxHp: 3,
+    hp: 5,
+    maxHp: 5,
     invincible: false,
     invincibleTimer: 0,
     score: 0,
@@ -610,6 +610,7 @@ function drawPowerup(ctx: CanvasRenderingContext2D, o: ActiveObstacle, frameCoun
   // Glow effect
   const glowColor = o.data.powerupType === "shield" ? "#00ff8818"
     : o.data.powerupType === "speed_boost" ? "#ff880018"
+    : o.data.powerupType === "heal" ? "#ff448818"
     : "#aa44ff18";
   ctx.fillStyle = glowColor;
   ctx.fillRect(cx - size * pulse, cy - size * pulse, size * 2 * pulse, size * 2 * pulse);
@@ -617,6 +618,7 @@ function drawPowerup(ctx: CanvasRenderingContext2D, o: ActiveObstacle, frameCoun
   // Outer ring
   const ringColor = o.data.powerupType === "shield" ? "#00ff88"
     : o.data.powerupType === "speed_boost" ? "#ff8800"
+    : o.data.powerupType === "heal" ? "#ff4488"
     : "#aa44ff";
   ctx.strokeStyle = ringColor;
   ctx.lineWidth = 2;
@@ -627,6 +629,7 @@ function drawPowerup(ctx: CanvasRenderingContext2D, o: ActiveObstacle, frameCoun
   // Inner filled circle
   const fillColor = o.data.powerupType === "shield" ? "#00cc66"
     : o.data.powerupType === "speed_boost" ? "#ff6600"
+    : o.data.powerupType === "heal" ? "#cc2255"
     : "#8833cc";
   ctx.fillStyle = fillColor;
   ctx.beginPath();
@@ -640,6 +643,7 @@ function drawPowerup(ctx: CanvasRenderingContext2D, o: ActiveObstacle, frameCoun
   ctx.textBaseline = "middle";
   const icon = o.data.powerupType === "shield" ? "S"
     : o.data.powerupType === "speed_boost" ? ">"
+    : o.data.powerupType === "heal" ? "+"
     : "M";
   ctx.fillText(icon, cx, cy);
   ctx.textBaseline = "alphabetic";
