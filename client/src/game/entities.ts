@@ -2,7 +2,7 @@
 // Polished neon-on-dark aesthetic with gradient sky, lit buildings, streetlights
 
 import type { GameObstacle } from "@shared/types";
-import { drawSprite, getSpriteForType, MOTORBIKE_SPRITE } from "./sprites";
+import { createDynamicSprite, drawSprite, getSpriteForType, MOTORBIKE_SPRITE } from "./sprites";
 
 // ── Constants ──────────────────────────────────────────────
 export const CANVAS_W = 960;
@@ -162,8 +162,11 @@ export function isObstacleOffScreen(o: ActiveObstacle): boolean {
 }
 
 export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle): void {
-  const sprite = getSpriteForType(o.data.type);
-  const scale = o.pixelWidth / 40; // Normalize sprite to obstacle width
+  const knownTypes = ["slow_motorbike", "taxi", "pho_cart", "bus", "cyclo"];
+  const sprite = knownTypes.includes(o.data.type)
+    ? getSpriteForType(o.data.type)
+    : createDynamicSprite(o.data.color, o.data.width);
+  const scale = o.pixelWidth / 40;
 
   // Ground shadow beneath obstacle
   ctx.fillStyle = "#00000030";

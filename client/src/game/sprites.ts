@@ -442,3 +442,48 @@ export function getSpriteForType(type: string): SpriteDefinition {
       return GENERIC_OBSTACLE_SPRITE;
   }
 }
+
+// Generate a dynamic colored sprite for AI-generated obstacles
+// Uses the obstacle's color from AI to create a unique-looking obstacle
+export function createDynamicSprite(color: string, width: "small" | "medium" | "large"): SpriteDefinition {
+  const w = width === "small" ? 30 : width === "medium" ? 50 : 70;
+  const h = width === "small" ? 20 : width === "medium" ? 28 : 35;
+  // Darken and lighten the base color for depth
+  const darken = (hex: string, amt: number) => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    const r = Math.max(0, (n >> 16) - amt);
+    const g = Math.max(0, ((n >> 8) & 0xff) - amt);
+    const b = Math.max(0, (n & 0xff) - amt);
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+  };
+  const lighten = (hex: string, amt: number) => {
+    const n = parseInt(hex.replace("#", ""), 16);
+    const r = Math.min(255, (n >> 16) + amt);
+    const g = Math.min(255, ((n >> 8) & 0xff) + amt);
+    const b = Math.min(255, (n & 0xff) + amt);
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+  };
+  return [
+    // Main body
+    [2, 4, w - 4, h - 6, color],
+    // Top highlight
+    [2, 4, w - 4, 3, lighten(color, 40)],
+    // Bottom shadow
+    [2, h - 4, w - 4, 2, darken(color, 50)],
+    // Left edge
+    [0, 6, 3, h - 10, darken(color, 30)],
+    // Right edge
+    [w - 3, 6, 3, h - 10, darken(color, 30)],
+    // Eye/detail left (gives it character)
+    [Math.floor(w * 0.2), 8, 4, 4, "#ffffff"],
+    [Math.floor(w * 0.2) + 1, 9, 2, 2, "#111111"],
+    // Eye/detail right
+    [Math.floor(w * 0.65), 8, 4, 4, "#ffffff"],
+    [Math.floor(w * 0.65) + 1, 9, 2, 2, "#111111"],
+    // "Mouth" or detail line
+    [Math.floor(w * 0.3), 16, Math.floor(w * 0.4), 2, darken(color, 40)],
+    // Wheels/feet
+    [4, h - 2, 6, 3, "#222222"],
+    [w - 10, h - 2, 6, 3, "#222222"],
+  ];
+}

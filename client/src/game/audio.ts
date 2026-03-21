@@ -9,11 +9,17 @@ export class AudioManager {
   private engineRunning = false;
 
   init(): void {
-    if (this.ctx) return;
+    if (this.ctx) {
+      // Resume if suspended (browser autoplay policy)
+      if (this.ctx.state === "suspended") this.ctx.resume();
+      return;
+    }
     this.ctx = new AudioContext();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.3;
+    this.masterGain.gain.value = 0.4;
     this.masterGain.connect(this.ctx.destination);
+    // Resume immediately in case it starts suspended
+    if (this.ctx.state === "suspended") this.ctx.resume();
   }
 
   private ensureContext(): AudioContext {

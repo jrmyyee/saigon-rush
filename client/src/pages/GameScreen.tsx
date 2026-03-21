@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { createWSClient } from "../lib/ws";
 import { createGame } from "../game/engine";
@@ -7,6 +7,8 @@ import type { GameStats, SuggestionFeedItem, WSMessage } from "@shared/types";
 import type { GameAPI } from "../game/engine";
 
 export function GameScreen() {
+  const [params] = useSearchParams();
+  const testMode = params.get("test") === "1";
   const sessionId = useMemo(() => Math.random().toString(36).slice(2, 6).toUpperCase(), []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameAPI | null>(null);
@@ -22,6 +24,7 @@ export function GameScreen() {
   useEffect(() => {
     if (phase !== "playing" || !canvasRef.current || gameRef.current) return;
     const game = createGame(canvasRef.current, {
+      testMode,
       onGameOver: (stats: GameStats) => {
         navigate(`/results?distance=${stats.distance}&dodged=${stats.obstaclesDodged}&chaos=${stats.audienceChaos}&misses=${stats.nearMisses}&speed=${stats.topSpeed}&hits=${stats.totalHits}&time=${stats.survivalTime}&rating=${encodeURIComponent(stats.rating)}`);
       },
@@ -29,7 +32,7 @@ export function GameScreen() {
     gameRef.current = game;
     game.start();
     return () => { game.destroy(); gameRef.current = null; };
-  }, [phase, navigate]);
+  }, [phase, navigate, testMode]);
 
   useEffect(() => {
     const ws = createWSClient("display", sessionId);
@@ -48,10 +51,32 @@ export function GameScreen() {
     return () => ws.close();
   }, [sessionId]);
 
+  // Also support keyboard directly on the game screen for testing
+  useEffect(() => {
+    if (phase !== "playing" && phase !== "waiting") return;
+    const onKey = (e: KeyboardEvent) => {
+      // Start game on any key if waiting
+      if (phase === "waiting") {
+        setPhase("playing");
+        return;
+      }
+      if (!gameRef.current) return;
+      if (e.key === "ArrowUp" || e.key === "w") gameRef.current.handleInput("lane_up");
+      else if (e.key === "ArrowDown" || e.key === "s") gameRef.current.handleInput("lane_down");
+      else if (e.key === " ") { e.preventDefault(); gameRef.current.handleInput("boost"); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phase]);
+
   if (phase === "waiting") {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center gap-6 bg-saigon-dark">
+      <div
+        className="w-full h-full flex flex-col items-center justify-center gap-6 bg-saigon-dark cursor-pointer"
+        onClick={() => setPhase("playing")}
+      >
         <h1 className="font-pixel text-neon-green text-3xl md:text-5xl tracking-wider">SAIGON RUSH</h1>
+        {testMode && <p className="text-neon-red font-pixel text-xs">TEST MODE — INFINITE LIVES</p>}
         <p className="text-white/60 font-pixel text-xs">Session: {sessionId}</p>
         <div className="flex gap-8">
           <div className="flex flex-col items-center gap-2">
@@ -63,7 +88,9 @@ export function GameScreen() {
             <span className="text-neon-yellow font-pixel text-[10px]">AUDIENCE</span>
           </div>
         </div>
-        <p className="text-white/40 font-pixel text-xs animate-pulse">Waiting for player...</p>
+        <p className="text-white/40 font-pixel text-xs animate-pulse">
+          Click anywhere, press any key, or scan QR to start
+        </p>
       </div>
     );
   }

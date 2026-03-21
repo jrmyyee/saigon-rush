@@ -106,6 +106,7 @@ export interface GameAPI {
 
 export interface GameOptions {
   onGameOver?: (stats: GameStats) => void;
+  testMode?: boolean; // Infinite HP for testing
 }
 
 export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): GameAPI {
@@ -118,6 +119,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   let lastTime = 0;
   let destroyed = false;
   const audio = new AudioManager();
+  const testMode = options?.testMode ?? false;
 
   // ── Update Logic ──────────────────────────────────────
   function update(dt: number): void {
@@ -166,10 +168,14 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
           for (let i = 0; i < 8; i++) {
             state.particles.push(createHitParticle(PLAYER_X, state.player.y));
           }
-          // Check game over
+          // Check game over (skip in test mode)
           if (state.player.hp <= 0) {
-            endGame();
-            return;
+            if (testMode) {
+              state.player.hp = 3; // Reset HP in test mode
+            } else {
+              endGame();
+              return;
+            }
           }
         }
         o.passed = true;
@@ -242,8 +248,8 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     }
     state.pendingWarnings = state.pendingWarnings.filter((w) => w.timer > 0);
 
-    // Timer game over (60-second rounds)
-    if (state.elapsed >= 60) {
+    // Timer game over (60-second rounds, disabled in test mode)
+    if (!testMode && state.elapsed >= 60) {
       endGame();
     }
   }
