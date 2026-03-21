@@ -5,13 +5,19 @@ export class AudioManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private sfxGain: GainNode | null = null; // Separate gain for SFX to prevent engine interference
-  private engineOsc: OscillatorNode | null = null;
-  private engineGain: GainNode | null = null;
   private engineRunning = false;
   private musicPlaying = false;
   private musicTimeouts: number[] = [];
-  private activeNodes: Array<AudioNode> = []; // Track for cleanup
   private activeTimeouts: Set<number> = new Set(); // Track scheduled cleanups for emergency teardown
+
+  // ── Putt-putt engine state ──────────────────────────────
+  private engineTimerId: number | null = null;
+  private engineFreq = 85;
+  private engineVol = 0.04;
+
+  // ── Music state ─────────────────────────────────────────
+  private musicSpeedMultiplier = 1.0;
+  private musicBPM = 180;
 
   init(): void {
     if (this.ctx) {
@@ -20,7 +26,9 @@ export class AudioManager {
     }
     this.ctx = new AudioContext();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.35;
+    // Soft ramp from 0 to avoid startup pop/click
+    this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
+    this.masterGain.gain.linearRampToValueAtTime(0.35, this.ctx.currentTime + 0.1);
     this.masterGain.connect(this.ctx.destination);
     // Separate SFX bus so effects don't interfere with engine
     this.sfxGain = this.ctx.createGain();
@@ -36,39 +44,25 @@ export class AudioManager {
     return this.ctx;
   }
 
-  // ── Engine Sound ──────────────────────────────────────
+  // ── Engine Sound (disabled — music + ambient honks replace it) ──
   playEngine(): void {
-    if (this.engineRunning) return;
-    const ctx = this.ensureContext();
-    if (!ctx) return;
-    this.engineOsc = ctx.createOscillator();
-    this.engineOsc.type = "sawtooth";
-    this.engineOsc.frequency.value = 85;
-    this.engineGain = ctx.createGain();
-    this.engineGain.gain.value = 0.04;
-    this.engineOsc.connect(this.engineGain);
-    this.engineGain.connect(this.masterGain!);
-    this.engineOsc.start();
-    this.engineRunning = true;
+    // No-op: the putt-putt engine sound was causing a buzzy/unpleasant audio glitch.
+    // The game now has music + ambient traffic honks + SFX which provide sufficient audio.
+    this.engineRunning = true; // Set flag so stopEngine() still works
   }
 
   stopEngine(): void {
-    if (!this.engineRunning || !this.engineOsc) return;
-    try { this.engineOsc.stop(); } catch { /* already stopped */ }
-    this.engineOsc.disconnect();
-    this.engineOsc = null;
-    this.engineGain?.disconnect();
-    this.engineGain = null;
+    if (!this.engineRunning) return;
+    if (this.engineTimerId !== null) {
+      clearInterval(this.engineTimerId);
+      this.engineTimerId = null;
+    }
     this.engineRunning = false;
   }
 
   setEngineSpeed(speed: number): void {
-    if (!this.engineOsc) return;
-    const freq = 80 + (speed / 800) * 60;
-    this.engineOsc.frequency.value = freq;
-    if (this.engineGain) {
-      this.engineGain.gain.value = Math.min(0.10, 0.04 + (speed / 800) * 0.06);
-    }
+    this.engineFreq = 80 + (speed / 800) * 60;
+    this.engineVol = Math.min(0.10, 0.04 + (speed / 800) * 0.06);
   }
 
   // ── SFX ───────────────────────────────────────────────
@@ -192,12 +186,133 @@ export class AudioManager {
     setTimeout(() => this.playTone(800, 0.08, "triangle", 0.08), 30);
   }
 
-  playHorn(): void { this.playTone(350, 0.2, "square", 0.12); }
+  playHorn(): void { this.playTrafficHonk(); }
   playBoost(): void { this.playTone(200, 0.25, "sawtooth", 0.1); }
+
+  /**
+   * Synthesize a realistic horn sound using square wave + amplitude modulation (AM).
+   * The 6Hz AM creates the characteristic horn "blat" wobble of real diaphragm horns.
+   * Frequencies: motorbike ~550Hz, car ~420Hz, truck ~280Hz.
+   */
+  private playHornSynth(baseFreq: number, duration: number, vol: number): void {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+
+    // Master gain with horn envelope: quick attack, sustain, abrupt cut
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.001, now);
+    master.gain.linearRampToValueAtTime(vol, now + 0.012); // 12ms attack
+    master.gain.setValueAtTime(vol, now + duration - 0.025);
+    master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    // Oscillator 1: square wave fundamental (classic horn timbre)
+    const osc1 = ctx.createOscillator();
+    osc1.type = "square";
+    osc1.frequency.setValueAtTime(baseFreq * 0.97, now); // Start slightly flat
+    osc1.frequency.linearRampToValueAtTime(baseFreq, now + 0.025); // Pitch bend up
+
+    // Oscillator 2: detuned +4Hz for beating/thickness
+    const osc2 = ctx.createOscillator();
+    osc2.type = "square";
+    osc2.frequency.value = baseFreq + 4;
+    const osc2Gain = ctx.createGain();
+    osc2Gain.gain.value = 0.6; // Slightly quieter than fundamental
+
+    // 6Hz Amplitude Modulation — creates the characteristic horn "blat" wobble
+    // This simulates the vibrating diaphragm of a real vehicle horn
+    const amLfo = ctx.createOscillator();
+    amLfo.type = "sine";
+    amLfo.frequency.value = 6; // 6Hz wobble rate
+    const amDepth = ctx.createGain();
+    amDepth.gain.value = vol * 0.35; // AM depth = 35% of volume
+
+    // AM modulates the master gain: output = signal * (1 + depth * sin(6Hz))
+    amLfo.connect(amDepth);
+    amDepth.connect(master.gain);
+
+    // Route oscillators through master gain
+    osc1.connect(master);
+    osc2.connect(osc2Gain);
+    osc2Gain.connect(master);
+    master.connect(this.sfxGain);
+
+    osc1.start(now); osc2.start(now); amLfo.start(now);
+    osc1.stop(now + duration + 0.02);
+    osc2.stop(now + duration + 0.02);
+    amLfo.stop(now + duration + 0.02);
+
+    osc1.onended = () => {
+      try { osc1.disconnect(); osc2.disconnect(); osc2Gain.disconnect(); amLfo.disconnect(); amDepth.disconnect(); master.disconnect(); } catch {}
+    };
+    const cleanupMs = (duration + 0.2) * 1000;
+    const tid = setTimeout(() => {
+      this.activeTimeouts.delete(tid);
+      try { osc1.disconnect(); osc2.disconnect(); osc2Gain.disconnect(); amLfo.disconnect(); amDepth.disconnect(); master.disconnect(); } catch {}
+    }, cleanupMs) as unknown as number;
+    this.activeTimeouts.add(tid);
+  }
+
+  /** Mega Honk — MASSIVE air horn blast */
+  playMegaHonk(): void {
+    // Layer 1: Deep truck air horn (two-tone, like real truck horns)
+    this.playHornSynth(145, 0.6, 0.18); // Low note
+    this.playHornSynth(195, 0.6, 0.15); // Higher note (major third = classic truck horn interval)
+    // Layer 2: Air burst noise
+    this.playNoiseBurst(0.10, 0.2, 300);
+    // Layer 3: Echo honk
+    setTimeout(() => {
+      this.playHornSynth(145, 0.35, 0.10);
+      this.playHornSynth(195, 0.35, 0.08);
+    }, 250);
+  }
+
+  /** Vietnamese traffic honk — varied, realistic horn sounds
+   * Frequencies tuned for each vehicle type's actual horn pitch */
+  playTrafficHonk(): void {
+    const r = Math.random();
+    if (r < 0.35) {
+      // Motorbike horn: high-pitched double beep (classic Vietnamese xe máy sound)
+      this.playHornSynth(550, 0.10, 0.10);
+      setTimeout(() => this.playHornSynth(570, 0.10, 0.08), 120);
+    } else if (r < 0.65) {
+      // Taxi/car horn: mid-range single honk
+      this.playHornSynth(420, 0.18, 0.12);
+    } else {
+      // Bus/truck: deep sustained horn
+      this.playHornSynth(280, 0.25, 0.10);
+    }
+  }
 
   playWarning(): void {
     this.playTone(600, 0.12, "square", 0.12);
     setTimeout(() => this.playTone(800, 0.12, "square", 0.12), 130);
+  }
+
+  // ── Projectile Sound ────────────────────────────────────
+  playProjectile(): void {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    const duration = 0.06;
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(800, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + duration);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + duration + 0.02);
+    osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch {} };
+    const cleanupMs = (duration + 0.2) * 1000;
+    const tid = setTimeout(() => {
+      this.activeTimeouts.delete(tid);
+      try { osc.disconnect(); gain.disconnect(); } catch {}
+    }, cleanupMs) as unknown as number;
+    this.activeTimeouts.add(tid);
   }
 
   // ── Category-Mapped Obstacle Sounds ──────────────────
@@ -268,7 +383,7 @@ export class AudioManager {
     }
   }
 
-  // ── Background Music (Chiptune Loop) ──────────────────
+  // ── Background Music (32-bar Vietnamese-Influenced Chiptune) ──
   startMusic(): void {
     if (this.musicPlaying) return;
     this.musicPlaying = true;
@@ -281,79 +396,262 @@ export class AudioManager {
     this.musicTimeouts = [];
   }
 
+  setMusicSpeed(speedMultiplier: number): void {
+    this.musicSpeedMultiplier = speedMultiplier;
+    // Scale BPM: base 180, up to 200 at high speed
+    this.musicBPM = Math.min(200, 180 + (speedMultiplier - 1) * 200);
+  }
+
+  // ── Đàn Tranh-style vibrato tone (triangle + LFO + octave doubling) ────
+  // Technique from duck.baby: every note plays TWO oscillators — one at pitch,
+  // one octave below — for a rich, full chiptune sound
+  private playVibratoTone(freq: number, duration: number, vol: number): void {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+
+    // Primary oscillator (triangle for đàn tranh character)
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    // 7Hz vibrato LFO — simulates đàn tranh tremolo
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = 7;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = freq * 0.015; // ±1.5% = ~25 cents
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(Math.max(0.005, vol), now);
+    gain.gain.setValueAtTime(Math.max(0.005, vol * 0.8), now + duration * 0.7);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    lfo.start(now);
+    osc.stop(now + duration + 0.02);
+    lfo.stop(now + duration + 0.02);
+
+    // Octave-below doubling (square wave for richness)
+    const osc2 = ctx.createOscillator();
+    osc2.type = "square";
+    osc2.frequency.value = freq / 2;
+    const gain2 = ctx.createGain();
+    gain2.gain.setValueAtTime(Math.max(0.005, vol * 0.4), now);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc2.connect(gain2);
+    gain2.connect(this.sfxGain);
+    osc2.start(now);
+    osc2.stop(now + duration + 0.02);
+
+    osc.onended = () => { try { osc.disconnect(); lfo.disconnect(); lfoGain.disconnect(); gain.disconnect(); osc2.disconnect(); gain2.disconnect(); } catch {} };
+    const cleanupMs = (duration + 0.2) * 1000;
+    const tid = setTimeout(() => {
+      this.activeTimeouts.delete(tid);
+      try { osc.disconnect(); lfo.disconnect(); lfoGain.disconnect(); gain.disconnect(); osc2.disconnect(); gain2.disconnect(); } catch {}
+    }, cleanupMs) as unknown as number;
+    this.activeTimeouts.add(tid);
+  }
+
   private playMusicLoop(): void {
     if (!this.musicPlaying) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
 
-    // Simple 8-bar chiptune melody in C minor — Vietnamese-influenced pentatonic
-    const bpm = 140;
+    const bpm = this.musicBPM;
     const beatMs = (60 / bpm) * 1000;
-    const notes = [
-      // bar 1-2: ascending phrase
-      { f: 262, d: 0.12, t: 0 },      // C4
-      { f: 311, d: 0.12, t: 1 },      // Eb4
-      { f: 392, d: 0.12, t: 2 },      // G4
-      { f: 466, d: 0.2, t: 3 },       // Bb4
-      { f: 523, d: 0.12, t: 4 },      // C5
-      { f: 466, d: 0.12, t: 5 },      // Bb4
-      { f: 392, d: 0.2, t: 6 },       // G4
-      { f: 349, d: 0.12, t: 7 },      // F4
-      // bar 3-4: descending phrase
-      { f: 392, d: 0.12, t: 8 },      // G4
-      { f: 523, d: 0.15, t: 9 },      // C5
-      { f: 466, d: 0.12, t: 10 },     // Bb4
-      { f: 392, d: 0.12, t: 11 },     // G4
-      { f: 311, d: 0.2, t: 12 },      // Eb4
-      { f: 262, d: 0.15, t: 13 },     // C4
-      { f: 311, d: 0.12, t: 14 },     // Eb4
-      { f: 349, d: 0.2, t: 15 },      // F4
+    const totalBeats = 64; // 16 bars × 4 beats — tight, energetic loop
+
+    // Transpose up 2 semitones at high speed for tension
+    const shift = this.musicSpeedMultiplier >= 1.10 ? Math.pow(2, 2 / 12) : 1;
+
+    // ── Vietnamese "Nam" mode (C-D-F-G-Bb) ──────────────
+    const C4 = 261.63 * shift, D4 = 293.66 * shift, F4 = 349.23 * shift;
+    const G4 = 392.00 * shift, Bb4 = 466.16 * shift;
+    const C5 = 523.25 * shift, D5 = 587.33 * shift, F5 = 698.46 * shift;
+    // Bass
+    const C3 = 130.81 * shift, D3 = 146.83 * shift, F3 = 174.61 * shift;
+    const G3 = 196.00 * shift, Bb3 = 233.08 * shift;
+
+    const useHarmony = this.musicSpeedMultiplier >= 1.03;
+    const useDoubleBass = this.musicSpeedMultiplier >= 1.06;
+
+    // ── Scheduling helpers ──────────────────────────────
+    const sched = (beat: number, fn: () => void) => {
+      const tid = setTimeout(() => { if (this.musicPlaying) fn(); }, beat * beatMs) as unknown as number;
+      this.musicTimeouts.push(tid);
+    };
+    const lead = (beat: number, freq: number, dur: number, vol: number) =>
+      sched(beat, () => this.playVibratoTone(freq, dur, vol));
+    const harmony = (beat: number, freq: number, dur: number, vol: number) => {
+      if (!useHarmony) return;
+      sched(beat, () => this.playTone(freq * Math.pow(2, 7 / 1200), dur, "square", vol));
+    };
+    const bass = (beat: number, freq: number, dur: number, vol: number) => {
+      sched(beat, () => {
+        this.playTone(freq, dur, "triangle", vol);
+        if (useDoubleBass) {
+          // Octave jump on the "and" — Vietnamese pop bass groove
+          setTimeout(() => {
+            if (this.musicPlaying) this.playTone(freq * 2, dur * 0.6, "triangle", vol * 0.7);
+          }, dur * 0.5 * 1000);
+        }
+      });
+    };
+    const kick = (beat: number) => sched(beat, () => this.playNoiseBurst(0.07, 0.10, 60));
+    const snare = (beat: number) => sched(beat, () => this.playNoiseBurst(0.05, 0.07, 3000));
+    const hihat = (beat: number) => sched(beat, () => this.playNoiseBurst(0.025, 0.04, 8000));
+    const accent = (beat: number, freq: number) => sched(beat, () => this.playTone(freq, 0.06, "square", 0.05));
+
+    // ═══════════════════════════════════════════════════════
+    // BARS 1-4: Main Riff — bouncy staccato (beats 0-15)
+    // Short punchy notes with rhythmic gaps = jumpy feel
+    // ═══════════════════════════════════════════════════════
+    lead(0, G4, 0.08, 0.08);  lead(0.5, G4, 0.06, 0.05);
+    lead(1, Bb4, 0.08, 0.08); lead(2, C5, 0.08, 0.09);
+    lead(2.5, C5, 0.06, 0.05); // echo bounce
+    lead(3, Bb4, 0.06, 0.06); lead(3.5, G4, 0.06, 0.06);
+    // Answer
+    lead(4, F4, 0.08, 0.07);  lead(5, G4, 0.08, 0.08);
+    lead(5.5, Bb4, 0.06, 0.06); lead(6, C5, 0.10, 0.09);
+    lead(7, Bb4, 0.06, 0.06); lead(7.5, G4, 0.06, 0.06);
+    // Phrase 3: rapid climbing
+    lead(8, G4, 0.06, 0.07);  lead(8.5, Bb4, 0.06, 0.07);
+    lead(9, C5, 0.06, 0.08);  lead(9.5, D5, 0.06, 0.08);
+    lead(10, F5, 0.10, 0.09); // peak
+    lead(11, D5, 0.06, 0.07); lead(11.5, C5, 0.06, 0.07);
+    // Bounce resolve
+    lead(12, Bb4, 0.08, 0.07); lead(13, G4, 0.08, 0.07);
+    lead(14, F4, 0.06, 0.06); lead(14.5, G4, 0.06, 0.06);
+    lead(15, Bb4, 0.08, 0.07);
+    // Stab accents on downbeats
+    accent(0, C5); accent(4, C5); accent(8, C5); accent(12, C5);
+
+    // ═══════════════════════════════════════════════════════
+    // BARS 5-8: Response — lower bounce (beats 16-31)
+    // ═══════════════════════════════════════════════════════
+    lead(16, D4, 0.08, 0.07); lead(16.5, D4, 0.06, 0.05);
+    lead(17, F4, 0.08, 0.07); lead(18, G4, 0.08, 0.08);
+    lead(18.5, G4, 0.06, 0.05);
+    lead(19, F4, 0.06, 0.06); lead(19.5, D4, 0.06, 0.06);
+    lead(20, C4, 0.08, 0.07); lead(21, D4, 0.08, 0.07);
+    lead(21.5, F4, 0.06, 0.06); lead(22, G4, 0.10, 0.08);
+    lead(23, F4, 0.06, 0.06); lead(23.5, D4, 0.06, 0.06);
+    // Rising answer
+    lead(24, F4, 0.06, 0.06); lead(24.5, G4, 0.06, 0.06);
+    lead(25, Bb4, 0.06, 0.07); lead(25.5, C5, 0.06, 0.07);
+    lead(26, D5, 0.10, 0.08);
+    lead(27, C5, 0.06, 0.07); lead(27.5, Bb4, 0.06, 0.06);
+    lead(28, G4, 0.08, 0.07); lead(29, F4, 0.06, 0.06);
+    lead(29.5, G4, 0.06, 0.06); lead(30, Bb4, 0.08, 0.07);
+    lead(31, G4, 0.06, 0.06); lead(31.5, F4, 0.06, 0.06);
+    accent(16, C5); accent(20, C5); accent(24, C5); accent(28, C5);
+
+    // ═══════════════════════════════════════════════════════
+    // BARS 9-12: Escalation — every beat, harmony, max bounce (beats 32-47)
+    // ═══════════════════════════════════════════════════════
+    const escalation: Array<[number, number]> = [
+      [32, G4], [32.5, Bb4], [33, C5], [33.5, D5],
+      [34, C5], [34.5, Bb4], [35, G4], [35.5, Bb4],
+      [36, C5], [36.5, D5], [37, F5], [37.5, D5],
+      [38, C5], [38.5, Bb4], [39, G4], [39.5, F4],
+      [40, G4], [40.5, Bb4], [41, C5], [41.5, D5],
+      [42, F5], [42.5, D5], [43, C5], [43.5, Bb4],
+      [44, G4], [44.5, Bb4], [45, C5], [45.5, D5],
+      [46, C5], [46.5, Bb4], [47, G4], [47.5, F4],
     ];
+    for (const [beat, freq] of escalation) {
+      lead(beat, freq, 0.07, 0.08);
+      harmony(beat, freq, 0.07, 0.04);
+    }
+    for (let b = 32; b < 48; b += 2) accent(b, C5);
 
-    // Bass line (lower octave, triangle wave)
-    const bass = [
-      { f: 131, d: 0.3, t: 0 },     // C3
-      { f: 131, d: 0.15, t: 2 },
-      { f: 156, d: 0.3, t: 4 },     // Eb3
-      { f: 156, d: 0.15, t: 6 },
-      { f: 175, d: 0.3, t: 8 },     // F3
-      { f: 175, d: 0.15, t: 10 },
-      { f: 196, d: 0.3, t: 12 },    // G3
-      { f: 156, d: 0.3, t: 14 },    // Eb3
+    // ═══════════════════════════════════════════════════════
+    // BARS 13-16: Peak — full send, rapid fire (beats 48-63)
+    // ═══════════════════════════════════════════════════════
+    // Rapid ascending runs
+    lead(48, C5, 0.06, 0.09);  lead(48.5, D5, 0.06, 0.09);
+    lead(49, F5, 0.10, 0.10);  lead(49.5, F5, 0.06, 0.07);
+    lead(50, D5, 0.06, 0.08);  lead(50.5, C5, 0.06, 0.08);
+    lead(51, Bb4, 0.06, 0.07); lead(51.5, G4, 0.06, 0.07);
+    // Second rapid climb
+    lead(52, Bb4, 0.06, 0.08); lead(52.5, C5, 0.06, 0.08);
+    lead(53, D5, 0.06, 0.09);  lead(53.5, F5, 0.06, 0.09);
+    lead(54, D5, 0.10, 0.10);
+    lead(55, C5, 0.06, 0.08);  lead(55.5, Bb4, 0.06, 0.07);
+    // Descending bounce finale
+    lead(56, C5, 0.06, 0.09);  lead(56.5, D5, 0.06, 0.09);
+    lead(57, F5, 0.08, 0.10);  lead(57.5, D5, 0.06, 0.08);
+    lead(58, C5, 0.06, 0.08);  lead(58.5, Bb4, 0.06, 0.07);
+    lead(59, G4, 0.06, 0.07);  lead(59.5, F4, 0.06, 0.07);
+    lead(60, D4, 0.06, 0.06);  lead(60.5, F4, 0.06, 0.06);
+    lead(61, G4, 0.06, 0.07);  lead(61.5, Bb4, 0.06, 0.07);
+    lead(62, C5, 0.06, 0.08);  lead(62.5, G4, 0.06, 0.07);
+    lead(63, F4, 0.08, 0.07);  lead(63.5, D4, 0.08, 0.07);
+    // Harmony throughout peak
+    for (const [beat, freq] of [[48,C5],[49,F5],[52,Bb4],[53,D5],[54,D5],[56,C5],[57,F5]] as Array<[number,number]>) {
+      harmony(beat, freq, 0.08, 0.05);
+    }
+    for (let b = 48; b < 64; b += 2) accent(b, C5);
+
+    // ═══════════════════════════════════════════════════════
+    // BASS: constant 8th-note pulse with octave jumps
+    // ═══════════════════════════════════════════════════════
+    const bassLine: Array<[number, number]> = [
+      // Bars 1-4
+      [0, C3], [2, C3], [4, F3], [6, G3],
+      [8, C3], [10, Bb3], [12, G3], [14, F3],
+      // Bars 5-8
+      [16, D3], [18, D3], [20, F3], [22, G3],
+      [24, D3], [26, F3], [28, G3], [30, Bb3],
+      // Bars 9-12: driving escalation
+      [32, C3], [34, G3], [36, C3], [38, Bb3],
+      [40, C3], [42, G3], [44, F3], [46, D3],
+      // Bars 13-16: peak bass
+      [48, C3], [50, F3], [52, G3], [54, Bb3],
+      [56, C3], [58, G3], [60, D3], [62, F3],
     ];
-
-    for (const n of notes) {
-      const tid = setTimeout(() => {
-        this.playTone(n.f, n.d, "square", 0.06);
-      }, n.t * beatMs) as unknown as number;
-      this.musicTimeouts.push(tid);
+    for (const [beat, freq] of bassLine) {
+      bass(beat, freq, 0.28, 0.09);
     }
 
-    for (const n of bass) {
-      const tid = setTimeout(() => {
-        this.playTone(n.f, n.d, "triangle", 0.08);
-      }, n.t * beatMs) as unknown as number;
-      this.musicTimeouts.push(tid);
+    // ═══════════════════════════════════════════════════════
+    // DRUMS: syncopated kick, driving hi-hats, snare accents
+    // ═══════════════════════════════════════════════════════
+
+    // Hi-hat: 8th notes throughout (every half-beat = jumpy driving pulse)
+    for (let b = 0; b < totalBeats; b += 0.5) {
+      hihat(b);
     }
 
-    // Percussion — kick drum on beats 0, 4, 8, 12; hi-hat on beats 2, 6, 10, 14
-    const kicks = [0, 4, 8, 12];
-    const hihats = [2, 6, 10, 14];
-    for (const beat of kicks) {
-      const tid = setTimeout(() => {
-        this.playNoiseBurst(0.06, 0.12, 80); // short low thump
-      }, beat * beatMs) as unknown as number;
-      this.musicTimeouts.push(tid);
-    }
-    for (const beat of hihats) {
-      const tid = setTimeout(() => {
-        this.playNoiseBurst(0.03, 0.06, 8000); // short high tick
-      }, beat * beatMs) as unknown as number;
-      this.musicTimeouts.push(tid);
+    // Kick: syncopated Vietnamese-inspired pattern per 4-bar phrase
+    const kickPattern = [0, 1.5, 3, 4, 5.5, 7, 8, 9.5, 11, 12, 13.5, 15];
+    for (let section = 0; section < 4; section++) {
+      const base = section * 16;
+      for (const offset of kickPattern) {
+        kick(base + offset);
+      }
     }
 
-    // Loop after 16 beats
-    const loopTid = setTimeout(() => this.playMusicLoop(), 16 * beatMs) as unknown as number;
+    // Snare: backbeats + fills
+    for (let b = 2; b < totalBeats; b += 4) {
+      snare(b); // Snare on beat 3 of each bar
+    }
+    // Snare fill at end of each 4-bar section
+    for (const fillStart of [14, 30, 46, 62]) {
+      snare(fillStart); snare(fillStart + 0.5);
+    }
+
+    // Accent stabs on downbeats (bars 9-16 only — adds urgency)
+    for (let b = 32; b < totalBeats; b += 4) {
+      accent(b, C5);
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // Loop after 64 beats
+    // ═══════════════════════════════════════════════════════
+    const loopTid = setTimeout(() => this.playMusicLoop(), totalBeats * beatMs) as unknown as number;
     this.musicTimeouts.push(loopTid);
   }
 
@@ -364,6 +662,12 @@ export class AudioManager {
     // Clear all proactive cleanup timeouts
     for (const tid of this.activeTimeouts) clearTimeout(tid);
     this.activeTimeouts.clear();
+    // Stop putt-putt engine timer
+    if (this.engineTimerId !== null) {
+      clearInterval(this.engineTimerId);
+      this.engineTimerId = null;
+      this.engineRunning = false;
+    }
     // Reconnect sfxGain so future sounds work
     this.sfxGain.connect(this.masterGain);
   }

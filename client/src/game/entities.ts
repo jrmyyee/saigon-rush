@@ -2,7 +2,8 @@
 // Polished neon-on-dark aesthetic with gradient sky, lit buildings, streetlights
 
 import type { GameObstacle } from "@shared/types";
-import { type SpriteDefinition, createDynamicSprite, drawSprite, getSpriteForType, MOTORBIKE_SPRITE } from "./sprites";
+import { type SpriteDefinition, drawSprite, getSpriteForType, MOTORBIKE_SPRITE } from "./sprites";
+import { getLibrarySprite } from "./spriteLibrary";
 
 // ── Obstacle Image Cache (fal.ai generated images) ────────
 const imageCache = new Map<string, HTMLImageElement>();
@@ -105,6 +106,11 @@ export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, frameCount:
 }
 
 // ── Active Obstacle (runtime state) ───────────────────────
+export interface SnakeSegment {
+  x: number;
+  y: number;
+}
+
 export interface ActiveObstacle {
   data: GameObstacle;
   x: number;
@@ -118,6 +124,10 @@ export interface ActiveObstacle {
   startY: number;
   driftTargetY: number;
   driftElapsed: number;
+  // Snake mechanic: chain of connected segments
+  snakeSegments?: SnakeSegment[];
+  // Projectile shooter: countdown timer to next shot
+  shootTimer?: number;
 }
 
 export function spawnObstacle(data: GameObstacle): ActiveObstacle {
@@ -150,7 +160,7 @@ export function spawnObstacle(data: GameObstacle): ActiveObstacle {
     driftTargetY = LANE_Y[targetLane];
   }
 
-  return {
+  const obstacle: ActiveObstacle = {
     data,
     x: CANVAS_W + 50,
     y,
@@ -164,42 +174,110 @@ export function spawnObstacle(data: GameObstacle): ActiveObstacle {
     driftTargetY,
     driftElapsed: 0,
   };
+
+  // Initialize chain segments from behavior fields
+  const chainCount = data.chainSegments || 0;
+  if (chainCount >= 2) {
+    const spacing = data.chainSpacing || 30;
+    obstacle.snakeSegments = [];
+    for (let i = 0; i < chainCount; i++) {
+      obstacle.snakeSegments.push({
+        x: CANVAS_W + 50 + i * spacing,
+        y,
+      });
+    }
+  }
+
+  // Initialize projectile timer from behavior fields
+  const shootInterval = data.projectileInterval || 0;
+  if (shootInterval > 0) {
+    obstacle.shootTimer = shootInterval * 0.5; // First shot at half interval (don't wait full cycle)
+  }
+
+  return obstacle;
 }
 
-export function updateObstacle(o: ActiveObstacle, baseSpeed: number, dt: number): void {
+/** Returns true if the obstacle should fire a projectile this frame */
+export function updateObstacle(o: ActiveObstacle, baseSpeed: number, dt: number): boolean {
   o.x -= baseSpeed * o.data.speed * dt;
 
-  if (o.movement === "weave") {
+  // Chain movement: head follows sine wave, body segments lerp toward previous
+  if (o.snakeSegments && o.snakeSegments.length > 0) {
+    const amplitude = (o.data.chainAmplitude || 50) * 0.7; // Scale 0-100 → 0-70px
+    o.sinePhase += dt * 2.5;
+    o.y = o.startY + Math.sin(o.sinePhase) * amplitude;
+    // Head = segment 0
+    o.snakeSegments[0].x = o.x;
+    o.snakeSegments[0].y = o.y;
+    // Body segments follow with delay
+    const spacing = o.data.chainSpacing || 30;
+    for (let i = 1; i < o.snakeSegments.length; i++) {
+      const prev = o.snakeSegments[i - 1];
+      const seg = o.snakeSegments[i];
+      seg.x += (prev.x + spacing - seg.x) * 6 * dt;
+      seg.y += (prev.y - seg.y) * 6 * dt;
+    }
+  } else if (o.movement === "weave") {
     o.sinePhase += dt * 3;
     o.y = o.startY + Math.sin(o.sinePhase) * 50;
   } else if (o.movement === "drift") {
-    // Lerp from startY to driftTargetY over ~3 seconds
     o.driftElapsed += dt;
     const t = Math.min(1, o.driftElapsed / 3);
     o.y = o.startY + (o.driftTargetY - o.startY) * t;
   }
+
+  // Projectile timer: fires when interval > 0 and timer expires
+  const interval = o.data.projectileInterval || 0;
+  if (interval > 0 && o.shootTimer !== undefined) {
+    o.shootTimer -= dt;
+    if (o.shootTimer <= 0) {
+      o.shootTimer = interval;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function isObstacleOffScreen(o: ActiveObstacle): boolean {
+  // For chain obstacles, use last segment position (tail trails behind head)
+  if (o.snakeSegments && o.snakeSegments.length > 0) {
+    const lastSeg = o.snakeSegments[o.snakeSegments.length - 1];
+    return lastSeg.x + 30 < -50;
+  }
   return o.x + o.pixelWidth < -50;
 }
 
-export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle): void {
-  // Try to render fal.ai generated image first
+export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle, frameCount?: number): void {
+  // Power-up rendering: glowing collectible
+  if (o.data.isPowerup) {
+    drawPowerup(ctx, o, frameCount || 0);
+    return;
+  }
+
+  // Chain: render connected segments
+  if (o.snakeSegments && o.snakeSegments.length > 0) {
+    drawSnake(ctx, o);
+    return;
+  }
+
+  // Wide: render across multiple lanes
+  const laneSpan = o.data.laneSpan || 1;
+  if (laneSpan > 1) {
+    drawWideLane(ctx, o);
+    return;
+  }
+
+  // Try to render generated image first
   if (o.data.imageUrl) {
     const img = getObstacleImage(o.data.imageUrl);
     if (img) {
-      // Draw ground shadow
       ctx.fillStyle = "#00000030";
       ctx.fillRect(o.x + 4, o.y + o.pixelHeight / 2 - 4, o.pixelWidth - 8, 6);
-
-      // Draw the generated image, scaled to obstacle size
       const imgAspect = img.width / img.height;
       const drawW = o.pixelWidth;
       const drawH = drawW / imgAspect;
       ctx.drawImage(img, o.x, o.y - drawH / 2, drawW, drawH);
-
-      // Still draw the label above
       if (o.data.label) {
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 10px monospace";
@@ -207,29 +285,43 @@ export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle): 
         ctx.fillText(o.data.label, o.x + o.pixelWidth / 2, o.y - drawH / 2 - 8);
         ctx.textAlign = "start";
       }
-      return; // Skip fillRect sprite rendering
+      return;
     }
   }
-  // Fallback: fillRect sprite rendering
+
+  // Sprite selection: AI spriteData → hand-crafted → generic crate fallback
+  // Sprite selection: AI spriteData → library → hand-crafted → generic
   const knownTypes = ["slow_motorbike", "taxi", "pho_cart", "bus", "cyclo"];
   let sprite: SpriteDefinition;
   if (o.data.spriteData && o.data.spriteData.length > 0) {
     sprite = o.data.spriteData.map(r => [r.x, r.y, r.w, r.h, r.c] as [number, number, number, number, string]);
-  } else if (knownTypes.includes(o.data.type)) {
-    sprite = getSpriteForType(o.data.type);
   } else {
-    sprite = createDynamicSprite(o.data.color, o.data.width);
+    const lib = getLibrarySprite(o.data.type);
+    if (lib) {
+      sprite = lib.sprite;
+    } else if (knownTypes.includes(o.data.type)) {
+      sprite = getSpriteForType(o.data.type);
+    } else {
+      sprite = getSpriteForType("generic");
+    }
   }
   const scale = o.pixelWidth / 40;
 
-  // Ground shadow beneath obstacle
+  // Projectile shooter: add cannon visual indicator
+  if ((o.data.projectileInterval || 0) > 0) {
+    // Cannon barrel pointing left (toward player)
+    ctx.fillStyle = "#ff4444";
+    ctx.fillRect(o.x - 8 * scale, o.y - 3, 10 * scale, 6);
+    ctx.fillStyle = "#cc2222";
+    ctx.fillRect(o.x - 6 * scale, o.y - 2, 8 * scale, 4);
+    // Muzzle flash glow
+    ctx.fillStyle = "#ff880022";
+    ctx.fillRect(o.x - 14 * scale, o.y - 8, 12 * scale, 16);
+  }
+
+  // Ground shadow
   ctx.fillStyle = "#00000030";
-  ctx.fillRect(
-    o.x + 4 * scale,
-    o.y + o.pixelHeight / 2 - 4 * scale,
-    o.pixelWidth - 8 * scale,
-    6 * scale,
-  );
+  ctx.fillRect(o.x + 4 * scale, o.y + o.pixelHeight / 2 - 4 * scale, o.pixelWidth - 8 * scale, 6 * scale);
 
   drawSprite(ctx, sprite, o.x, o.y - o.pixelHeight / 2, scale);
 
@@ -241,15 +333,369 @@ export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle): 
   ctx.textAlign = "left";
 }
 
+// Color utility functions for sprite shading
+function darkenHex(hex: string, amt: number): string {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const r = Math.max(0, (n >> 16) - amt);
+  const g = Math.max(0, ((n >> 8) & 0xff) - amt);
+  const b = Math.max(0, (n & 0xff) - amt);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+function lightenHex(hex: string, amt: number): string {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const r = Math.min(255, (n >> 16) + amt);
+  const g = Math.min(255, ((n >> 8) & 0xff) + amt);
+  const b = Math.min(255, (n & 0xff) + amt);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+function drawChainSegment(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, bodyColor: string, index: number, total: number): void {
+  const t = index / total; // 0 = near head, 1 = tail
+  const w = size;
+  const h = size * 0.8;
+  const dark = darkenHex(bodyColor, 40);
+  const darker = darkenHex(bodyColor, 70);
+  const light = lightenHex(bodyColor, 50);
+  const lighter = lightenHex(bodyColor, 80);
+
+  // Ground shadow
+  ctx.fillStyle = "#00000030";
+  ctx.fillRect(x - w / 2 + 2, y + h / 2 + 1, w, 3);
+
+  // Main body — rounded via overlapping rects
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(x - w / 2 + 2, y - h / 2, w - 4, h);        // Core
+  ctx.fillRect(x - w / 2, y - h / 2 + 2, w, h - 4);        // Wider middle
+  // Top highlight
+  ctx.fillStyle = light;
+  ctx.fillRect(x - w / 2 + 2, y - h / 2, w - 4, 3);
+  ctx.fillRect(x - w / 2 + 3, y - h / 2 + 3, w - 6, 1);
+  // Bottom shadow
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - w / 2 + 2, y + h / 2 - 3, w - 4, 3);
+  // Left edge shadow
+  ctx.fillStyle = dark;
+  ctx.fillRect(x - w / 2, y - h / 2 + 3, 2, h - 6);
+  // Right edge highlight
+  ctx.fillStyle = lightenHex(bodyColor, 25);
+  ctx.fillRect(x + w / 2 - 2, y - h / 2 + 3, 2, h - 6);
+
+  // Scale/detail pattern (alternating rows give texture)
+  ctx.fillStyle = darker + "44";
+  const patternOffset = (index % 2) * 3;
+  for (let py = y - h / 2 + 4 + patternOffset; py < y + h / 2 - 4; py += 6) {
+    for (let px = x - w / 2 + 3; px < x + w / 2 - 3; px += 6) {
+      ctx.fillRect(px, py, 3, 3);
+    }
+  }
+
+  // Center spine/seam line
+  ctx.fillStyle = lighter + "33";
+  ctx.fillRect(x - 1, y - h / 2 + 1, 2, h - 2);
+
+  // Belly underbelly (lighter center bottom)
+  ctx.fillStyle = lighter + "22";
+  ctx.fillRect(x - w / 4, y + 1, w / 2, h / 2 - 3);
+
+  // Small decorative nub/fin on top for organic look (every other segment)
+  if (index % 2 === 0 && t < 0.8) {
+    ctx.fillStyle = light;
+    ctx.fillRect(x - 2, y - h / 2 - 2, 4, 3);
+    ctx.fillStyle = lighter;
+    ctx.fillRect(x - 1, y - h / 2 - 2, 2, 1);
+  }
+}
+
+function drawSnake(ctx: CanvasRenderingContext2D, o: ActiveObstacle): void {
+  if (!o.snakeSegments) return;
+  const segs = o.snakeSegments;
+  const bodyColor = o.data.bodyColor || o.data.color || "#44aa44";
+
+  // Draw connecting tissue between segments (thicker, styled)
+  ctx.strokeStyle = darkenHex(bodyColor, 20);
+  ctx.lineWidth = 8;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(segs[0].x, segs[0].y);
+  for (let i = 1; i < segs.length; i++) {
+    ctx.lineTo(segs[i].x, segs[i].y);
+  }
+  ctx.stroke();
+  // Inner connector (lighter, thinner)
+  ctx.strokeStyle = bodyColor + "88";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(segs[0].x, segs[0].y);
+  for (let i = 1; i < segs.length; i++) {
+    ctx.lineTo(segs[i].x, segs[i].y);
+  }
+  ctx.stroke();
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "miter";
+
+  // Draw body segments (back to front so head overlaps)
+  // Check: AI segmentSpriteData → library segmentSprite → fallback drawChainSegment
+  let segSpriteDef: SpriteDefinition | null = null;
+  if (o.data.segmentSpriteData && o.data.segmentSpriteData.length > 0) {
+    segSpriteDef = o.data.segmentSpriteData.map(r => [r.x, r.y, r.w, r.h, r.c] as [number, number, number, number, string]);
+  } else {
+    const lib = getLibrarySprite(o.data.type);
+    if (lib?.segmentSprite) segSpriteDef = lib.segmentSprite;
+  }
+  for (let i = segs.length - 1; i >= 1; i--) {
+    const seg = segs[i];
+    if (segSpriteDef) {
+      const taper = 1 - (i / segs.length) * 0.2;
+      const scale = 0.5 * taper;
+      drawSprite(ctx, segSpriteDef, seg.x - 12, seg.y - 12, scale);
+    } else {
+      const taper = 1 - (i / segs.length) * 0.35;
+      const size = 18 * taper;
+      drawChainSegment(ctx, seg.x, seg.y, size, bodyColor, i, segs.length);
+    }
+  }
+
+  // Draw head — AI spriteData → library → detailed fallback
+  const head = segs[0];
+  let headSprite: SpriteDefinition | null = null;
+  if (o.data.spriteData && o.data.spriteData.length > 0) {
+    headSprite = o.data.spriteData.map(r => [r.x, r.y, r.w, r.h, r.c] as [number, number, number, number, string]);
+  } else {
+    const lib = getLibrarySprite(o.data.type);
+    if (lib) headSprite = lib.sprite;
+  }
+  if (headSprite) {
+    const scale = 0.6;
+    drawSprite(ctx, headSprite, head.x - 15, head.y - 12, scale);
+  } else {
+    // Detailed fallback head
+    const hs = 24;
+    const light = lightenHex(bodyColor, 30);
+    const dark = darkenHex(bodyColor, 40);
+    // Shadow
+    ctx.fillStyle = "#00000030";
+    ctx.fillRect(head.x - hs / 2 + 2, head.y + hs / 2 + 1, hs, 4);
+    // Head shape (slightly wider than body)
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(head.x - hs / 2 + 2, head.y - hs / 2, hs - 4, hs);
+    ctx.fillRect(head.x - hs / 2, head.y - hs / 2 + 2, hs, hs - 4);
+    // Top highlight
+    ctx.fillStyle = light;
+    ctx.fillRect(head.x - hs / 2 + 3, head.y - hs / 2, hs - 6, 3);
+    // Bottom jaw
+    ctx.fillStyle = dark;
+    ctx.fillRect(head.x - hs / 2 + 2, head.y + hs / 2 - 4, hs - 4, 4);
+    // Snout/nose extension
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(head.x - hs / 2 - 4, head.y - 3, 6, 6);
+    ctx.fillStyle = dark;
+    ctx.fillRect(head.x - hs / 2 - 4, head.y + 1, 6, 3);
+    // Eyes (white with dark pupil, expressive)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(head.x - 6, head.y - 8, 6, 6);
+    ctx.fillRect(head.x + 2, head.y - 8, 6, 6);
+    ctx.fillStyle = "#111111";
+    ctx.fillRect(head.x - 5, head.y - 7, 3, 4);
+    ctx.fillRect(head.x + 3, head.y - 7, 3, 4);
+    // Eye glint
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(head.x - 5, head.y - 7, 1, 1);
+    ctx.fillRect(head.x + 3, head.y - 7, 1, 1);
+    // Brow ridges
+    ctx.fillStyle = dark;
+    ctx.fillRect(head.x - 7, head.y - 9, 7, 2);
+    ctx.fillRect(head.x + 1, head.y - 9, 7, 2);
+    // Nostrils
+    ctx.fillStyle = "#111111";
+    ctx.fillRect(head.x - hs / 2 - 2, head.y - 1, 2, 2);
+    // Teeth
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(head.x - hs / 2 - 2, head.y + 2, 2, 3);
+    ctx.fillRect(head.x - hs / 2 + 1, head.y + 3, 2, 2);
+  }
+
+  // Label above head
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 11px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText(o.data.label, head.x, head.y - 18);
+  ctx.textAlign = "left";
+}
+
+function drawWideLane(ctx: CanvasRenderingContext2D, o: ActiveObstacle): void {
+  // Build lane list from laneSpan starting at obstacle's lane
+  const span = o.data.laneSpan || 2;
+  const startLane = o.data.lane;
+  const lanes: number[] = [];
+  for (let i = 0; i < span; i++) {
+    const l = startLane + i;
+    if (l <= 2) lanes.push(l);
+  }
+  // If we'd go off the bottom, shift upward
+  if (lanes.length < span) {
+    lanes.length = 0;
+    for (let i = 0; i < span; i++) {
+      lanes.push(Math.max(0, 2 - span + 1 + i));
+    }
+  }
+  const gapLane = (o.data.gapLane !== undefined && o.data.gapLane >= 0) ? o.data.gapLane : undefined;
+  const color = o.data.color || "#cc3333";
+  const darkColor = darkenHex(color, 40);
+  const lightColor = lightenHex(color, 30);
+
+  // Resolve sprite for this obstacle (same fallback chain as standard obstacles)
+  let sprite: SpriteDefinition | null = null;
+  if (o.data.spriteData && o.data.spriteData.length > 0) {
+    sprite = o.data.spriteData.map(r => [r.x, r.y, r.w, r.h, r.c] as [number, number, number, number, string]);
+  } else {
+    const lib = getLibrarySprite(o.data.type);
+    if (lib) sprite = lib.sprite;
+  }
+
+  for (const lane of lanes) {
+    const laneY = LANE_Y[lane];
+    const isGap = lane === gapLane;
+
+    if (isGap) {
+      // Gap lane: subtle pulsing arrow hint, no intrusive labels
+      ctx.fillStyle = "#44ff8812";
+      ctx.fillRect(o.x + 8, laneY - 20, o.pixelWidth - 16, 40);
+    } else {
+      // Ground shadow
+      ctx.fillStyle = "#00000030";
+      ctx.fillRect(o.x + 4, laneY + 26, o.pixelWidth - 8, 6);
+
+      if (sprite) {
+        // Draw the actual obstacle sprite in each blocked lane
+        const scale = o.pixelWidth / 50;
+        drawSprite(ctx, sprite, o.x, laneY - 20, scale);
+      } else {
+        // Themed barrier using obstacle's color (not hardcoded red)
+        // Three-layer shading: dark base → obstacle color → light top edge
+        ctx.fillStyle = darkColor;
+        ctx.fillRect(o.x, laneY - 28, o.pixelWidth, 56);
+        ctx.fillStyle = color;
+        ctx.fillRect(o.x + 2, laneY - 26, o.pixelWidth - 4, 52);
+        ctx.fillStyle = lightColor;
+        ctx.fillRect(o.x + 2, laneY - 26, o.pixelWidth - 4, 2);
+        // Hazard stripe at top and bottom edges
+        ctx.fillStyle = "#ffcc0066";
+        for (let sx = o.x; sx < o.x + o.pixelWidth; sx += 16) {
+          ctx.fillRect(sx, laneY - 28, 8, 3);
+          ctx.fillRect(sx + 8, laneY + 25, 8, 3);
+        }
+        // Darker center fill
+        ctx.fillStyle = darkColor + "88";
+        ctx.fillRect(o.x + 6, laneY - 18, o.pixelWidth - 12, 36);
+      }
+    }
+  }
+
+  // Label above the topmost lane
+  const topLane = Math.min(...lanes);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 12px monospace";
+  ctx.textAlign = "center";
+  ctx.fillText(o.data.label, o.x + o.pixelWidth / 2, LANE_Y[topLane] - 36);
+  ctx.textAlign = "left";
+}
+
+function drawPowerup(ctx: CanvasRenderingContext2D, o: ActiveObstacle, frameCount: number): void {
+  const pulse = Math.sin(frameCount * 0.15) * 0.2 + 0.8;
+  const size = 24;
+  const cx = o.x + o.pixelWidth / 2;
+  const cy = o.y;
+
+  // Glow effect
+  const glowColor = o.data.powerupType === "shield" ? "#00ff8818"
+    : o.data.powerupType === "speed_boost" ? "#ff880018"
+    : "#aa44ff18";
+  ctx.fillStyle = glowColor;
+  ctx.fillRect(cx - size * pulse, cy - size * pulse, size * 2 * pulse, size * 2 * pulse);
+
+  // Outer ring
+  const ringColor = o.data.powerupType === "shield" ? "#00ff88"
+    : o.data.powerupType === "speed_boost" ? "#ff8800"
+    : "#aa44ff";
+  ctx.strokeStyle = ringColor;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * pulse * 0.7, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Inner filled circle
+  const fillColor = o.data.powerupType === "shield" ? "#00cc66"
+    : o.data.powerupType === "speed_boost" ? "#ff6600"
+    : "#8833cc";
+  ctx.fillStyle = fillColor;
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Icon inside
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 14px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const icon = o.data.powerupType === "shield" ? "S"
+    : o.data.powerupType === "speed_boost" ? ">"
+    : "M";
+  ctx.fillText(icon, cx, cy);
+  ctx.textBaseline = "alphabetic";
+
+  // Label
+  ctx.fillStyle = ringColor;
+  ctx.font = "bold 10px monospace";
+  ctx.fillText(o.data.label, cx, cy - size - 4);
+  ctx.textAlign = "left";
+}
+
 // ── Collision Detection (AABB with generous hitbox) ───────
 export function checkCollision(p: Player, o: ActiveObstacle): boolean {
-  // Player hitbox (centered on PLAYER_X, player Y)
   const pw = 30 * HITBOX_SCALE;
   const ph = 30 * HITBOX_SCALE;
   const px = PLAYER_X - pw / 2;
   const py = p.y - ph / 2;
 
-  // Obstacle hitbox (centered)
+  // Chain: check collision against ALL segments (takes priority over wide)
+  if (o.snakeSegments && o.snakeSegments.length > 0) {
+    for (const seg of o.snakeSegments) {
+      const segSize = 16;
+      const sx = seg.x - segSize / 2;
+      const sy = seg.y - segSize / 2;
+      if (px < sx + segSize && px + pw > sx && py < sy + segSize && py + ph > sy) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Wide obstacle: check if player lane is in the spanned lanes (and not in gap)
+  const laneSpan = o.data.laneSpan || 1;
+  if (laneSpan > 1) {
+    const ow = o.pixelWidth * HITBOX_SCALE;
+    const ox = o.x + (o.pixelWidth - ow) / 2;
+    if (px < ox + ow && px + pw > ox) {
+      const startLane = o.data.lane;
+      const spanned: number[] = [];
+      for (let i = 0; i < laneSpan; i++) {
+        const l = startLane + i;
+        if (l <= 2) spanned.push(l);
+      }
+      if (spanned.length < laneSpan) {
+        spanned.length = 0;
+        for (let i = 0; i < laneSpan; i++) {
+          spanned.push(Math.max(0, 2 - laneSpan + 1 + i));
+        }
+      }
+      const gap = (o.data.gapLane !== undefined && o.data.gapLane >= 0) ? o.data.gapLane : -1;
+      return spanned.includes(p.lane) && p.lane !== gap;
+    }
+    return false;
+  }
+
+  // Standard AABB collision
   const ow = o.pixelWidth * HITBOX_SCALE;
   const oh = o.pixelHeight * HITBOX_SCALE;
   const ox = o.x + (o.pixelWidth - ow) / 2;

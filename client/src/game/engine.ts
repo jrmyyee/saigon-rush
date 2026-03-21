@@ -32,12 +32,13 @@ import {
   updateRoad,
 } from "./entities";
 import { AudioManager } from "./audio";
+import { getLibrarySprite } from "./spriteLibrary";
 
 // ── Default obstacle templates for random spawner ─────────
 const DEFAULT_OBSTACLES: Omit<GameObstacle, "id" | "lane" | "fromAudience" | "audienceMessage">[] = [
-  { type: "slow_motorbike", displayName: "Slow Motorbike", width: "small", speed: 0.6, color: "#cc4444", dangerLevel: 1, label: "\ud83c\udfcd\ufe0f Motorbike" },
-  { type: "pho_cart", displayName: "Ph\u1edf Cart", width: "medium", speed: 0.3, color: "#ff8844", dangerLevel: 1, label: "\ud83c\udf5c Ph\u1edf Cart" },
-  { type: "taxi", displayName: "Taxi", width: "large", speed: 0.8, color: "#ffdd00", dangerLevel: 2, label: "\ud83d\ude95 Taxi" },
+  { type: "slow_motorbike", displayName: "Slow Motorbike", width: "small", speed: 0.6, color: "#cc4444", dangerLevel: 1, label: "\ud83c\udfcd\ufe0f Motorbike", soundCategory: "vehicle" },
+  { type: "pho_cart", displayName: "Ph\u1edf Cart", width: "medium", speed: 0.3, color: "#ff8844", dangerLevel: 1, label: "\ud83c\udf5c Ph\u1edf Cart", soundCategory: "food" },
+  { type: "taxi", displayName: "Taxi", width: "large", speed: 0.8, color: "#ffdd00", dangerLevel: 2, label: "\ud83d\ude95 Taxi", soundCategory: "vehicle" },
 ];
 
 let obstacleIdCounter = 0;
@@ -61,13 +62,17 @@ interface InternalState {
   shakeTimer: number;
   shakeIntensity: number;
   hitFlashTimer: number;
+  hitstopFrames: number; // Freeze game for N frames on collision impact
   suggestionQueue: GameObstacle[];
   pendingWarnings: Array<{ obstacle: GameObstacle; timer: number; lane: number; tickerX: number; sirenTimer: number }>;
+  announcements: Array<{ text: string; description: string; timer: number; maxTimer: number; color: string }>;
   obstaclesDodged: number;
   nearMisses: number;
   audienceChaos: number;
   totalHits: number;
   topSpeed: number;
+  powerupSpawnTimer: number;
+  powerups: PowerupEffects;
 }
 
 function createState(): InternalState {
@@ -86,14 +91,25 @@ function createState(): InternalState {
     shakeTimer: 0,
     shakeIntensity: 0,
     hitFlashTimer: 0,
+    hitstopFrames: 0,
     suggestionQueue: [],
     pendingWarnings: [],
+    announcements: [],
     obstaclesDodged: 0,
     nearMisses: 0,
     audienceChaos: 0,
     totalHits: 0,
     topSpeed: 0,
+    powerupSpawnTimer: 10,    // First power-up at ~10s
+    powerups: { shieldActive: false, speedBoostTimer: 0, magnetCharges: 0 },
   };
+}
+
+// ── Power-up Effect Tracking ──────────────────────────────
+interface PowerupEffects {
+  shieldActive: boolean;
+  speedBoostTimer: number;
+  magnetCharges: number;
 }
 
 // ── Public API ────────────────────────────────────────────
@@ -102,6 +118,7 @@ export interface GameAPI {
   handleInput(action: InputAction): void;
   addObstacle(obstacle: GameObstacle): void;
   updateObstacleImage(obstacleId: string, imageUrl: string): void;
+  updateObstacleSpriteData(obstacleId: string, spriteData: Array<{ x: number; y: number; w: number; h: number; c: string }>, obstacleType?: string): void;
   getState(): GameState;
   destroy(): void;
 }
@@ -122,10 +139,19 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   let destroyed = false;
   const audio = new AudioManager();
   const testMode = options?.testMode ?? false;
+  // Runtime sprite cache: stores Claude-generated sprites by type for reuse
+  // When a sprite arrives after the obstacle is gone, cache it here for next spawn
+  const runtimeSpriteCache = new Map<string, import("./sprites").SpriteDefinition>();
 
   // ── Update Logic ──────────────────────────────────────
   function update(dt: number): void {
     if (state.phase !== "playing") return;
+
+    // Hitstop: freeze game for N frames on big impacts (makes hits feel devastating)
+    if (state.hitstopFrames > 0) {
+      state.hitstopFrames--;
+      return; // Skip ALL game logic — everything freezes
+    }
 
     state.elapsed += dt;
     state.frameCount++;
@@ -134,6 +160,9 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     state.baseSpeed = 300 + state.elapsed * 4;
     state.topSpeed = Math.max(state.topSpeed, state.baseSpeed);
     audio.setEngineSpeed(state.baseSpeed);
+    // Music speeds up with game — mapped so it's noticeable but stays audible
+    // baseSpeed 300 → 1.0x, 500 → 1.07x, 700 → 1.14x (cap at 200 BPM)
+    audio.setMusicSpeed(1 + (state.baseSpeed - 300) / 3000);
 
     // Player distance / score
     state.player.distance += state.baseSpeed * dt;
@@ -153,28 +182,105 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       spawnNextObstacle();
     }
 
+    // Power-up timers
+    if (state.powerups.speedBoostTimer > 0) {
+      state.powerups.speedBoostTimer -= dt;
+      state.baseSpeed += 120; // Temporary speed burst during boost
+      if (state.powerups.speedBoostTimer <= 0) {
+        state.powerups.speedBoostTimer = 0;
+      }
+    }
+
+    // Ambient traffic sounds — random honks from on-screen vehicles
+    if (state.frameCount % 60 === 0) { // Check every second
+      const vehicles = state.obstacles.filter(o => o.x > 50 && o.x < CANVAS_W - 50 && !o.data.isPowerup && o.data.soundCategory === "vehicle");
+      if (vehicles.length > 0 && Math.random() < 0.5) {
+        audio.playTrafficHonk();
+      }
+      // Animals moo/growl less frequently
+      const animals = state.obstacles.filter(o => o.x > 50 && o.x < CANVAS_W - 50 && !o.data.isPowerup && o.data.soundCategory === "animal");
+      if (animals.length > 0 && Math.random() < 0.3) {
+        audio.playCategorySound("animal");
+      }
+    }
+
     // Update obstacles
+    const projectilesToSpawn: Array<{ x: number; y: number; lane: number; speed: number; pattern: string; color: string }> = [];
     for (const o of state.obstacles) {
-      updateObstacle(o, state.baseSpeed, dt);
+      const shouldFire = updateObstacle(o, state.baseSpeed, dt);
+      if (shouldFire) {
+        projectilesToSpawn.push({
+          x: o.x - 10,
+          y: o.y,
+          lane: o.data.lane,
+          speed: o.data.projectileSpeed || 2.0,
+          pattern: o.data.projectilePattern || "forward",
+          color: o.data.projectileColor || "#ff4444",
+        });
+      }
 
       // Check collision
       if (!o.passed && checkCollision(state.player, o)) {
+        // Power-up: apply effect instead of damage
+        if (o.data.isPowerup) {
+          o.passed = true;
+          applyPowerup(o.data.powerupType || "shield");
+          audio.playDodge(); // Satisfying pickup sound
+          state.particles.push(
+            createTextParticle(PLAYER_X + 40, state.player.y - 30, `${o.data.label}`),
+          );
+          continue;
+        }
+
+        // Magnet auto-dodge: consume a charge to skip this collision
+        if (state.powerups.magnetCharges > 0) {
+          state.powerups.magnetCharges--;
+          o.passed = true;
+          state.obstaclesDodged++;
+          state.particles.push(
+            createTextParticle(PLAYER_X + 40, state.player.y - 30, "MAGNET!"),
+          );
+          audio.playDodge();
+          continue;
+        }
+
+        // Shield absorbs one hit
+        if (state.powerups.shieldActive) {
+          state.powerups.shieldActive = false;
+          o.passed = true;
+          state.particles.push(
+            createTextParticle(PLAYER_X + 40, state.player.y - 30, "SHIELD!"),
+          );
+          // Small shake but no damage
+          state.shakeTimer = 0.1;
+          state.shakeIntensity = 4;
+          for (let i = 0; i < 4; i++) {
+            state.particles.push(createHitParticle(PLAYER_X, state.player.y));
+          }
+          continue;
+        }
+
         if (!state.player.invincible) {
+          // Speed boost grants invincibility
+          if (state.powerups.speedBoostTimer > 0) {
+            o.passed = true;
+            continue;
+          }
+
           playerHit(state.player);
           state.totalHits++;
           state.shakeTimer = 0.2;
           state.shakeIntensity = 8;
           state.hitFlashTimer = 0.1;
-          audio.silenceAll(); // Nuclear reset: kill any lingering sounds
+          state.hitstopFrames = 4; // 4-frame freeze — makes impacts feel devastating
+          audio.silenceAll();
           audio.playCrash();
-          // Hit particles
           for (let i = 0; i < 8; i++) {
             state.particles.push(createHitParticle(PLAYER_X, state.player.y));
           }
-          // Check game over (skip in test mode)
           if (state.player.hp <= 0) {
             if (testMode) {
-              state.player.hp = 3; // Reset HP in test mode
+              state.player.hp = 3;
             } else {
               endGame();
               return;
@@ -196,16 +302,74 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
         );
       }
 
-      // Mark dodged
-      if (!o.passed && o.x + o.pixelWidth < PLAYER_X - 20) {
-        o.passed = true;
-        state.obstaclesDodged++;
-        if (o.data.fromAudience) state.audienceChaos++;
+      // Mark dodged — for chains, use last segment position
+      if (!o.passed) {
+        let passedX = o.x + o.pixelWidth;
+        if (o.snakeSegments && o.snakeSegments.length > 0) {
+          const lastSeg = o.snakeSegments[o.snakeSegments.length - 1];
+          passedX = lastSeg.x + 20;
+        }
+        if (passedX < PLAYER_X - 20) {
+          o.passed = true;
+          state.obstaclesDodged++;
+          if (o.data.fromAudience) state.audienceChaos++;
+        }
+      }
+    }
+
+    // Spawn projectiles from shooters
+    for (const proj of projectilesToSpawn) {
+      audio.playProjectile();
+      const pattern = proj.pattern || "forward";
+      const projSpeed = proj.speed || 2.0;
+      const projColor = proj.color || "#ff4444";
+
+      // Determine how many projectiles and their Y-offsets
+      const spawns: Array<{ yOffset: number }> =
+        pattern === "spread" ? [{ yOffset: -60 }, { yOffset: 0 }, { yOffset: 60 }]
+        : [{ yOffset: 0 }];
+
+      for (const spawn of spawns) {
+        const projectileData: GameObstacle = {
+          id: nextId(),
+          type: "projectile",
+          displayName: "Projectile",
+          lane: proj.lane as 0 | 1 | 2,
+          width: "small",
+          speed: projSpeed,
+          color: projColor,
+          dangerLevel: 1,
+          label: "",
+          audienceMessage: "",
+          fromAudience: false,
+        };
+        const projectile = spawnObstacle(projectileData);
+        projectile.x = proj.x;
+        projectile.pixelWidth = 12;
+        projectile.pixelHeight = 8;
+
+        if (pattern === "aimed") {
+          // Track player's current lane
+          projectile.y = proj.y;
+          projectile.startY = proj.y;
+          projectile.driftTargetY = state.player.y;
+          projectile.driftElapsed = 0;
+          projectile.movement = "drift";
+        } else {
+          // Forward or spread — fixed Y trajectory
+          projectile.y = proj.y + spawn.yOffset;
+          projectile.startY = proj.y + spawn.yOffset;
+        }
+
+        state.obstacles.push(projectile);
       }
     }
 
     // Remove off-screen obstacles
     state.obstacles = state.obstacles.filter((o) => !isObstacleOffScreen(o));
+
+    // Power-up spawning
+    spawnPowerups(dt);
 
     // Dust trail particles
     state.dustTimer -= dt;
@@ -255,9 +419,23 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
         if (w.obstacle.soundEffectAudio) {
           audio.playSoundEffect(w.obstacle.soundEffectAudio);
         }
+        // Announcement banner for audience obstacles
+        if (w.obstacle.fromAudience) {
+          state.announcements.push({
+            text: w.obstacle.label,
+            description: w.obstacle.audienceMessage || w.obstacle.displayName,
+            timer: 3.0,
+            maxTimer: 3.0,
+            color: w.obstacle.color || "#ff4444",
+          });
+        }
       }
     }
     state.pendingWarnings = state.pendingWarnings.filter((w) => w.timer > 0);
+
+    // Update announcements (decay + remove)
+    for (const a of state.announcements) a.timer -= dt;
+    state.announcements = state.announcements.filter((a) => a.timer > 0);
 
     // Timer game over (60-second rounds, disabled in test mode)
     if (!testMode && state.elapsed >= 60) {
@@ -281,6 +459,75 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       };
     }
     state.obstacles.push(spawnObstacle(data));
+  }
+
+  function applyPowerup(type: string): void {
+    switch (type) {
+      case "shield":
+        state.powerups.shieldActive = true;
+        break;
+      case "speed_boost":
+        state.powerups.speedBoostTimer = 3.0; // 3-second boost
+        break;
+      case "magnet":
+        state.powerups.magnetCharges = 3; // Auto-dodge next 3 obstacles (legacy)
+        break;
+      case "mega_honk":
+        // MEGA HONK: push all on-screen obstacles away with a blast
+        audio.playMegaHonk();
+        state.shakeTimer = 0.15;
+        state.shakeIntensity = 6;
+        for (const o of state.obstacles) {
+          if (!o.data.isPowerup && o.x > -50 && o.x < CANVAS_W + 50) {
+            // Push obstacles away from player — move them right (backward)
+            o.x += 200;
+            // Also push vertically away from player
+            if (o.y < state.player.y) o.y -= 60;
+            else o.y += 60;
+            o.passed = true;
+            state.obstaclesDodged++;
+          }
+        }
+        // Big visual feedback
+        for (let i = 0; i < 12; i++) {
+          state.particles.push(createHitParticle(PLAYER_X + 30, state.player.y));
+        }
+        state.particles.push(
+          createTextParticle(PLAYER_X + 60, state.player.y - 40, "MEGA HONK!"),
+        );
+        break;
+    }
+  }
+
+  function spawnPowerups(dt: number): void {
+    if (state.elapsed < 10) return;
+    state.powerupSpawnTimer -= dt;
+    if (state.powerupSpawnTimer <= 0) {
+      state.powerupSpawnTimer = 12 + Math.random() * 8;
+      const types: Array<{ type: "shield" | "speed_boost" | "mega_honk"; label: string; color: string }> = [
+        { type: "shield", label: "\ud83d\udee1\ufe0f Shield", color: "#00ff88" },
+        { type: "speed_boost", label: "\u26a1 Speed!", color: "#ff8800" },
+        { type: "mega_honk", label: "\ud83d\udce2 MEGA HONK", color: "#ffaa00" },
+      ];
+      const pick = types[Math.floor(Math.random() * types.length)];
+      const lane = (Math.floor(Math.random() * 3)) as 0 | 1 | 2;
+      state.obstacles.push(spawnObstacle({
+        id: nextId(),
+        type: "powerup",
+        displayName: pick.label,
+        lane,
+        width: "small",
+        speed: 0.8,
+        color: pick.color,
+        dangerLevel: 1,
+        label: pick.label,
+        audienceMessage: "",
+        fromAudience: false,
+        movement: "straight",
+        isPowerup: true,
+        powerupType: pick.type,
+      }));
+    }
   }
 
   function endGame(): void {
@@ -313,17 +560,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
 
   // ── Render Logic ──────────────────────────────────────
 
-  // Pre-compute scanline pattern flag (avoids per-frame overhead)
-  let scanlineOn = true;
-
-  function drawScanlines(ctx: CanvasRenderingContext2D): void {
-    if (!scanlineOn) return;
-    // CRT scanlines — every 6px, only 107 calls total, subtle effect
-    ctx.fillStyle = "#00000012";
-    for (let y = 0; y < CANVAS_H; y += 6) {
-      ctx.fillRect(0, y, CANVAS_W, 1);
-    }
-  }
+  // Scanlines moved to CSS (zero canvas cost) — see index.css .scanlines class
 
   function drawVignette(ctx: CanvasRenderingContext2D): void {
     // Corner darkening — 4 rectangles fading inward
@@ -420,7 +657,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       }
 
       // Obstacles
-      for (const o of state.obstacles) drawObstacle(ctx, o);
+      for (const o of state.obstacles) drawObstacle(ctx, o, state.frameCount);
 
       // Warning zones for pending audience obstacles (telegraph system)
       for (const w of state.pendingWarnings) {
@@ -468,11 +705,55 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       }
 
       // Post-processing: scanlines + vignette
-      drawScanlines(ctx);
+
       drawVignette(ctx);
 
       // HUD (drawn after post-processing so it's crisp)
       drawHUD(ctx, state);
+
+      // "SURVIVE THE TRAFFIC!" objective text (first 3 seconds, fades out)
+      if (state.elapsed < 3) {
+        const fadeAlpha = state.elapsed < 2 ? 1 : 1 - (state.elapsed - 2);
+        ctx.globalAlpha = fadeAlpha;
+        // Glow behind text
+        ctx.fillStyle = "#00000088";
+        ctx.fillRect(CANVAS_W / 2 - 200, CANVAS_H / 2 - 30, 400, 50);
+        ctx.fillStyle = "#ffcc00";
+        ctx.font = "bold 28px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("SURVIVE THE TRAFFIC!", CANVAS_W / 2, CANVAS_H / 2 + 2);
+        ctx.textAlign = "left";
+        ctx.globalAlpha = 1;
+      }
+
+      // Announcement banners for audience-spawned obstacles
+      for (let i = 0; i < state.announcements.length; i++) {
+        const a = state.announcements[i];
+        const progress = 1 - a.timer / a.maxTimer; // 0→1
+        // Slide in from top over 0.3s, hold, fade out last 0.5s
+        const slideIn = Math.min(1, progress * (a.maxTimer / 0.3));
+        const fadeOut = a.timer < 0.5 ? a.timer / 0.5 : 1;
+        const yOffset = -60 + slideIn * 60 + i * 56;
+        ctx.globalAlpha = fadeOut;
+        // Banner background
+        ctx.fillStyle = "#000000cc";
+        ctx.fillRect(CANVAS_W / 2 - 220, 76 + yOffset, 440, 48);
+        // Colored accent bar
+        ctx.fillStyle = a.color;
+        ctx.fillRect(CANVAS_W / 2 - 220, 76 + yOffset, 4, 48);
+        ctx.fillRect(CANVAS_W / 2 + 216, 76 + yOffset, 4, 48);
+        // Obstacle name
+        ctx.fillStyle = a.color;
+        ctx.font = "bold 18px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(a.text, CANVAS_W / 2, 98 + yOffset);
+        // Description
+        ctx.fillStyle = "#ffffff99";
+        ctx.font = "11px monospace";
+        ctx.fillText(a.description.slice(0, 50), CANVAS_W / 2, 116 + yOffset);
+        ctx.textAlign = "left";
+        ctx.globalAlpha = 1;
+      }
     }
 
     if (state.phase === "game_over") {
@@ -509,11 +790,10 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     if (Math.floor(Date.now() / 500) % 2 === 0) {
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 16px monospace";
-      ctx.fillText("Waiting for controller...", CANVAS_W / 2, CANVAS_H / 2 + 60);
+      ctx.fillText("Press any key or scan QR to start", CANVAS_W / 2, CANVAS_H / 2 + 60);
     }
 
-    // Scanlines + vignette on waiting screen too
-    drawScanlines(ctx);
+    // Vignette (scanlines handled by CSS .scanlines class)
     drawVignette(ctx);
 
     ctx.textAlign = "left";
@@ -587,13 +867,52 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     if (s.player.dodgeCombo >= 2) {
       const comboPulse = Math.sin(s.frameCount * 0.2) * 0.15 + 0.85;
       ctx.globalAlpha = comboPulse;
-      // Combo background
       ctx.fillStyle = "#ff44ff22";
       ctx.fillRect(CANVAS_W / 2 - 60, 46, 120, 20);
       ctx.fillStyle = "#ff88ff";
       ctx.font = "bold 16px monospace";
       ctx.textAlign = "center";
       ctx.fillText(`${s.player.dodgeCombo}x COMBO`, CANVAS_W / 2, 62);
+      ctx.globalAlpha = 1;
+    }
+
+    // Power-up status indicators (bottom-right)
+    let pIdx = 0;
+    if (s.powerups.shieldActive) {
+      ctx.fillStyle = "#00ff8844";
+      ctx.fillRect(CANVAS_W - 110, CANVAS_H - 28 - pIdx * 18, 100, 16);
+      ctx.fillStyle = "#00ff88";
+      ctx.font = "bold 11px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText("\ud83d\udee1\ufe0f SHIELD", CANVAS_W - 14, CANVAS_H - 16 - pIdx * 18);
+      pIdx++;
+    }
+    if (s.powerups.speedBoostTimer > 0) {
+      ctx.fillStyle = "#ff880044";
+      ctx.fillRect(CANVAS_W - 110, CANVAS_H - 28 - pIdx * 18, 100, 16);
+      ctx.fillStyle = "#ff8800";
+      ctx.font = "bold 11px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`\u26a1 ${s.powerups.speedBoostTimer.toFixed(1)}s`, CANVAS_W - 14, CANVAS_H - 16 - pIdx * 18);
+      pIdx++;
+    }
+    if (s.powerups.magnetCharges > 0) {
+      ctx.fillStyle = "#aa44ff44";
+      ctx.fillRect(CANVAS_W - 110, CANVAS_H - 28 - pIdx * 18, 100, 16);
+      ctx.fillStyle = "#aa44ff";
+      ctx.font = "bold 11px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`\ud83e\uddf2 x${s.powerups.magnetCharges}`, CANVAS_W - 14, CANVAS_H - 16 - pIdx * 18);
+    }
+
+    // Control hints (bottom center, subtle, fade out after 8 seconds)
+    if (s.elapsed < 8) {
+      const hintAlpha = s.elapsed < 6 ? 0.5 : 0.5 * (1 - (s.elapsed - 6) / 2);
+      ctx.globalAlpha = hintAlpha;
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("W/S or \u2191/\u2193: DODGE", CANVAS_W / 2, CANVAS_H - 8);
       ctx.globalAlpha = 1;
     }
 
@@ -652,8 +971,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     const surv = Math.min(60, Math.floor(s.elapsed * 10) / 10);
     ctx.fillText(`Survived: ${surv}s  |  Top speed: ${Math.floor(s.topSpeed / 5)} km/h`, CANVAS_W / 2, CANVAS_H / 2 + 76);
 
-    // Scanlines on top
-    drawScanlines(ctx);
+    // Vignette (scanlines handled by CSS .scanlines class)
     drawVignette(ctx);
 
     ctx.textAlign = "left";
@@ -684,8 +1002,8 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       state.elapsed = 0;
       audio.init();
       audio.playEngine();
-      audio.startMusic();
-      audio.playHorn();
+      setTimeout(() => audio.startMusic(), 50);
+      setTimeout(() => audio.playHorn(), 100);
     },
 
     handleInput(action: InputAction) {
@@ -708,6 +1026,22 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     },
 
     addObstacle(obstacle: GameObstacle) {
+      // Upgrade low-quality GPT sprites (≤12 rects) with better sources:
+      // Priority: runtime cache (previous Opus result) → sprite library → keep GPT fallback
+      if (!obstacle.spriteData || obstacle.spriteData.length <= 12) {
+        if (runtimeSpriteCache.has(obstacle.type)) {
+          const cached = runtimeSpriteCache.get(obstacle.type)!;
+          obstacle.spriteData = cached.map(([x, y, w, h, c]) => ({ x, y, w, h, c }));
+        } else {
+          const lib = getLibrarySprite(obstacle.type);
+          if (lib) {
+            obstacle.spriteData = lib.sprite.map(([x, y, w, h, c]) => ({ x, y, w, h, c }));
+            if (lib.segmentSprite && !obstacle.segmentSpriteData) {
+              obstacle.segmentSpriteData = lib.segmentSprite.map(([x, y, w, h, c]) => ({ x, y, w, h, c }));
+            }
+          }
+        }
+      }
       if (obstacle.fromAudience) {
         // Preload fal.ai image during the 3.5-second warning phase
         if (obstacle.imageUrl) {
@@ -731,15 +1065,29 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     },
 
     updateObstacleImage(obstacleId: string, imageUrl: string) {
-      // Update an already-spawned obstacle with a DALL-E image that arrived late
       preloadObstacleImage(imageUrl);
-      // Check active obstacles
       for (const o of state.obstacles) {
         if (o.data.id === obstacleId) { o.data.imageUrl = imageUrl; return; }
       }
-      // Check pending warnings
       for (const w of state.pendingWarnings) {
         if (w.obstacle.id === obstacleId) { w.obstacle.imageUrl = imageUrl; return; }
+      }
+    },
+
+    updateObstacleSpriteData(obstacleId: string, spriteData: Array<{ x: number; y: number; w: number; h: number; c: string }>, obstacleType?: string) {
+      // Try to update the live obstacle with the high-quality sprite
+      for (const o of state.obstacles) {
+        if (o.data.id === obstacleId) { o.data.spriteData = spriteData; return; }
+      }
+      for (const w of state.pendingWarnings) {
+        if (w.obstacle.id === obstacleId) { w.obstacle.spriteData = spriteData; return; }
+      }
+      for (const q of state.suggestionQueue) {
+        if (q.id === obstacleId) { q.spriteData = spriteData; return; }
+      }
+      // Obstacle already gone — cache in runtime sprite map so NEXT spawn of this type uses it
+      if (obstacleType) {
+        runtimeSpriteCache.set(obstacleType, spriteData.map(r => [r.x, r.y, r.w, r.h, r.c] as [number, number, number, number, string]));
       }
     },
 

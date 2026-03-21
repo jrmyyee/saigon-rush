@@ -3,11 +3,17 @@ import { useSearchParams } from "react-router-dom";
 import { createWSClient } from "../lib/ws";
 import type { SuggestionFeedItem, WSMessage } from "@shared/types";
 
+const INSPIRATION_CHIPS = [
+  "dragon", "karaoke truck", "angry grandma", "durian cart",
+  "water buffalo", "conga line", "fireworks", "street dog",
+];
+
 export function Audience() {
   const [params] = useSearchParams();
   const sessionId = params.get("session") ?? "";
   const [text, setText] = useState("");
   const [cooldown, setCooldown] = useState(0);
+  const [generating, setGenerating] = useState(false);
   const [feed, setFeed] = useState<SuggestionFeedItem[]>([]);
   const [error, setError] = useState("");
   const wsRef = useRef<ReturnType<typeof createWSClient> | null>(null);
@@ -18,9 +24,13 @@ export function Audience() {
     wsRef.current = ws;
     ws.onMessage((msg: WSMessage) => {
       if (msg.type === "suggestion_accepted") {
+        setGenerating(false);
         setFeed((f) => [{ text: msg.original, result: msg.result.label, timestamp: Date.now() }, ...f].slice(0, 20));
       }
-      if (msg.type === "suggestion_rejected") setError(msg.reason);
+      if (msg.type === "suggestion_rejected") {
+        setGenerating(false);
+        setError(msg.reason);
+      }
     });
     return () => ws.close();
   }, [sessionId]);
@@ -31,11 +41,13 @@ export function Audience() {
     return () => clearInterval(t);
   }, [cooldown]);
 
-  const submit = () => {
-    if (!text.trim() || cooldown > 0) return;
-    wsRef.current?.send({ type: "suggestion", text: text.trim() });
+  const submit = (value?: string) => {
+    const msg = (value || text).trim();
+    if (!msg || cooldown > 0) return;
+    wsRef.current?.send({ type: "suggestion", text: msg });
     setText("");
     setError("");
+    setGenerating(true);
     setCooldown(15);
   };
 
@@ -44,8 +56,23 @@ export function Audience() {
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-saigon-dark p-4 gap-4 overflow-hidden">
+    <div className="w-full h-full flex flex-col bg-saigon-dark p-4 gap-3 overflow-hidden">
       <h1 className="font-pixel text-neon-yellow text-xl text-center">SEND CHAOS</h1>
+
+      {/* Inspiration chips */}
+      <div className="flex flex-wrap gap-1.5 justify-center">
+        {INSPIRATION_CHIPS.map((chip) => (
+          <button
+            key={chip}
+            className="bg-saigon-road/80 text-white/70 text-xs px-2.5 py-1 rounded-full border border-white/10 active:bg-neon-yellow/20 active:border-neon-yellow/40 disabled:opacity-30"
+            onClick={() => { setText(chip); submit(chip); }}
+            disabled={cooldown > 0}
+          >
+            {chip}
+          </button>
+        ))}
+      </div>
+
       <div className="flex gap-2">
         <input
           className="flex-1 bg-saigon-road text-white px-3 py-2 rounded border border-neon-yellow/30 focus:border-neon-yellow outline-none"
@@ -58,12 +85,21 @@ export function Audience() {
         />
         <button
           className="bg-neon-yellow text-saigon-dark font-bold px-4 py-2 rounded disabled:opacity-40 font-pixel text-xs"
-          onClick={submit}
+          onClick={() => submit()}
           disabled={!text.trim() || cooldown > 0}
         >
           {cooldown > 0 ? `${cooldown}s` : "SEND"}
         </button>
       </div>
+
+      {/* Generating indicator */}
+      {generating && (
+        <div className="flex items-center gap-2 px-2">
+          <div className="w-3 h-3 border-2 border-neon-yellow border-t-transparent rounded-full animate-spin" />
+          <p className="text-neon-yellow text-xs animate-pulse">Generating obstacle...</p>
+        </div>
+      )}
+
       {error && <p className="text-neon-red text-xs">{error}</p>}
       <div className="flex-1 overflow-y-auto flex flex-col gap-2">
         {feed.map((item, i) => (
@@ -72,7 +108,7 @@ export function Audience() {
             <p className="text-neon-green text-sm">{item.result}</p>
           </div>
         ))}
-        {feed.length === 0 && <p className="text-white/30 text-center text-sm mt-8">No suggestions yet. Be the first!</p>}
+        {feed.length === 0 && !generating && <p className="text-white/30 text-center text-sm mt-8">No suggestions yet. Be the first!</p>}
       </div>
     </div>
   );
