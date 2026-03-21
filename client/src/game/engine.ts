@@ -205,11 +205,16 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       state.particles.push(createDustParticle(PLAYER_X - 20, state.player.y));
     }
 
-    // Speed lines at high velocity
+    // Speed lines at high velocity — more frequent and multi-line at extreme speeds
     state.speedLineTimer -= dt;
-    if (state.baseSpeed > 450 && state.speedLineTimer <= 0) {
-      state.speedLineTimer = 0.08;
+    if (state.baseSpeed > 400 && state.speedLineTimer <= 0) {
+      const speedFactor = Math.min(1, (state.baseSpeed - 400) / 300);
+      state.speedLineTimer = 0.1 - speedFactor * 0.06; // 0.1s down to 0.04s
       state.particles.push(createSpeedLine(state.player.y));
+      // Extra speed lines at very high speeds
+      if (state.baseSpeed > 550) {
+        state.particles.push(createSpeedLine(state.player.y));
+      }
     }
 
     // Update particles
@@ -289,6 +294,81 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   }
 
   // ── Render Logic ──────────────────────────────────────
+
+  // Pre-compute scanline pattern flag (avoids per-frame overhead)
+  let scanlineOn = true;
+
+  function drawScanlines(ctx: CanvasRenderingContext2D): void {
+    if (!scanlineOn) return;
+    // CRT scanlines — every 6px, only 107 calls total, subtle effect
+    ctx.fillStyle = "#00000012";
+    for (let y = 0; y < CANVAS_H; y += 6) {
+      ctx.fillRect(0, y, CANVAS_W, 1);
+    }
+  }
+
+  function drawVignette(ctx: CanvasRenderingContext2D): void {
+    // Corner darkening — 4 rectangles fading inward
+    // Top edge
+    ctx.fillStyle = "#00000044";
+    ctx.fillRect(0, 0, CANVAS_W, 20);
+    ctx.fillStyle = "#00000022";
+    ctx.fillRect(0, 20, CANVAS_W, 20);
+    // Bottom edge
+    ctx.fillStyle = "#00000044";
+    ctx.fillRect(0, CANVAS_H - 20, CANVAS_W, 20);
+    ctx.fillStyle = "#00000022";
+    ctx.fillRect(0, CANVAS_H - 40, CANVAS_W, 20);
+    // Left edge
+    ctx.fillStyle = "#00000033";
+    ctx.fillRect(0, 0, 30, CANVAS_H);
+    ctx.fillStyle = "#00000018";
+    ctx.fillRect(30, 0, 30, CANVAS_H);
+    // Right edge
+    ctx.fillStyle = "#00000033";
+    ctx.fillRect(CANVAS_W - 30, 0, 30, CANVAS_H);
+    ctx.fillStyle = "#00000018";
+    ctx.fillRect(CANVAS_W - 60, 0, 30, CANVAS_H);
+    // Corners extra dark
+    ctx.fillStyle = "#00000033";
+    ctx.fillRect(0, 0, 60, 40);
+    ctx.fillRect(CANVAS_W - 60, 0, 60, 40);
+    ctx.fillRect(0, CANVAS_H - 40, 60, 40);
+    ctx.fillRect(CANVAS_W - 60, CANVAS_H - 40, 60, 40);
+  }
+
+  function drawIncomingWarning(ctx: CanvasRenderingContext2D, s: InternalState): void {
+    // Show "INCOMING!" for audience-spawned obstacles that are still off-screen
+    for (const o of s.obstacles) {
+      if (!o.data.fromAudience || o.x < CANVAS_W - 40) continue;
+      // Pulsing warning
+      const pulse = Math.sin(s.frameCount * 0.3) * 0.3 + 0.7;
+      const yBase = LANE_Y[o.data.lane];
+      // Warning flash bar across the lane
+      ctx.fillStyle = `rgba(255, 50, 50, ${0.08 * pulse})`;
+      ctx.fillRect(0, yBase - 40, CANVAS_W, 80);
+      // Arrow indicators (right edge)
+      ctx.fillStyle = `rgba(255, 100, 50, ${0.7 * pulse})`;
+      ctx.fillRect(CANVAS_W - 20, yBase - 8, 16, 4);
+      ctx.fillRect(CANVAS_W - 14, yBase - 14, 10, 4);
+      ctx.fillRect(CANVAS_W - 14, yBase + 10, 10, 4);
+      // "INCOMING!" text
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = "#ff4444";
+      ctx.font = "bold 18px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("INCOMING!", CANVAS_W - 80, yBase + 5);
+      // Audience message below
+      if (o.data.audienceMessage) {
+        ctx.fillStyle = "#ffaa44";
+        ctx.font = "bold 12px monospace";
+        ctx.fillText(o.data.audienceMessage, CANVAS_W - 80, yBase + 22);
+      }
+      ctx.textAlign = "left";
+      ctx.globalAlpha = 1;
+    }
+  }
+
   function render(): void {
     ctx.save();
 
@@ -301,7 +381,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     }
 
     // Clear
-    ctx.fillStyle = "#0a0a0a";
+    ctx.fillStyle = "#060610";
     ctx.fillRect(-10, -10, CANVAS_W + 20, CANVAS_H + 20);
 
     if (state.phase === "waiting") {
@@ -310,9 +390,21 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     } else if (state.phase === "playing" || state.phase === "game_over") {
       // Background + road
       drawRoad(ctx, state.road);
+
+      // Speed lines overlay at high speeds (dramatic streaks)
+      if (state.baseSpeed > 500) {
+        const intensity = Math.min(1, (state.baseSpeed - 500) / 300);
+        ctx.fillStyle = `rgba(68, 221, 255, ${0.02 * intensity})`;
+        for (let i = 0; i < 4; i++) {
+          const ly = 160 + ((state.frameCount * 7 + i * 167) % 360);
+          ctx.fillRect(0, ly, CANVAS_W, 1);
+        }
+      }
+
       // Obstacles
       for (const o of state.obstacles) drawObstacle(ctx, o);
-      // Warning zones for pending audience obstacles
+
+      // Warning zones for pending audience obstacles (telegraph system)
       for (const w of state.pendingWarnings) {
         const laneY = LANE_Y[w.lane];
         const pulseAlpha = 0.15 + 0.15 * Math.sin(state.elapsed * 10);
@@ -341,16 +433,27 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
           ctx.fillText(text, w.tickerX, 66);
         }
       }
+
+      // Incoming warnings for audience obstacles already spawned but still off-screen
+      drawIncomingWarning(ctx, state);
+
       // Player
       drawPlayer(ctx, state.player, state.frameCount);
+
       // Particles
       for (const p of state.particles) drawParticle(ctx, p);
+
       // Hit flash overlay
       if (state.hitFlashTimer > 0) {
         ctx.fillStyle = `rgba(255, 0, 0, ${state.hitFlashTimer * 3})`;
         ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
       }
-      // HUD
+
+      // Post-processing: scanlines + vignette
+      drawScanlines(ctx);
+      drawVignette(ctx);
+
+      // HUD (drawn after post-processing so it's crisp)
       drawHUD(ctx, state);
     }
 
@@ -362,35 +465,82 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   }
 
   function drawWaitingScreen(ctx: CanvasRenderingContext2D): void {
+    // Dark overlay behind title
+    ctx.fillStyle = "#00000088";
+    ctx.fillRect(CANVAS_W / 2 - 260, CANVAS_H / 2 - 80, 520, 180);
+    // Border glow
+    ctx.fillStyle = "#00ff8822";
+    ctx.fillRect(CANVAS_W / 2 - 262, CANVAS_H / 2 - 82, 524, 2);
+    ctx.fillRect(CANVAS_W / 2 - 262, CANVAS_H / 2 + 98, 524, 2);
+    ctx.fillRect(CANVAS_W / 2 - 262, CANVAS_H / 2 - 82, 2, 182);
+    ctx.fillRect(CANVAS_W / 2 + 260, CANVAS_H / 2 - 82, 2, 182);
+
+    // Title glow
+    ctx.fillStyle = "#00ff8818";
+    ctx.fillRect(CANVAS_W / 2 - 200, CANVAS_H / 2 - 62, 400, 30);
     // Title
     ctx.fillStyle = "#00ff88";
     ctx.font = "bold 48px monospace";
     ctx.textAlign = "center";
-    ctx.fillText("SAIGON RUSH", CANVAS_W / 2, CANVAS_H / 2 - 40);
+    ctx.fillText("SAIGON RUSH", CANVAS_W / 2, CANVAS_H / 2 - 36);
     // Subtitle
     ctx.fillStyle = "#ffcc00";
     ctx.font = "bold 20px monospace";
-    ctx.fillText("Survive Ho Chi Minh City traffic!", CANVAS_W / 2, CANVAS_H / 2 + 10);
+    ctx.fillText("Survive Ho Chi Minh City traffic!", CANVAS_W / 2, CANVAS_H / 2 + 14);
     // Blink "press start"
     if (Math.floor(Date.now() / 500) % 2 === 0) {
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 16px monospace";
       ctx.fillText("Waiting for controller...", CANVAS_W / 2, CANVAS_H / 2 + 60);
     }
+
+    // Scanlines + vignette on waiting screen too
+    drawScanlines(ctx);
+    drawVignette(ctx);
+
     ctx.textAlign = "left";
   }
 
   function drawHUD(ctx: CanvasRenderingContext2D, s: InternalState): void {
-    // HP hearts
-    const heartSize = 22;
+    // HUD background strips (semi-transparent)
+    ctx.fillStyle = "#00000044";
+    ctx.fillRect(0, 0, CANVAS_W, 50);
+    ctx.fillStyle = "#00000022";
+    ctx.fillRect(0, 50, CANVAS_W, 2);
+
+    // HP hearts — improved pixel heart shape
     for (let i = 0; i < s.player.maxHp; i++) {
-      ctx.fillStyle = i < s.player.hp ? "#ff4444" : "#333333";
-      ctx.fillRect(20 + i * (heartSize + 8), 16, heartSize, heartSize);
-      // Heart shape approximation with small rects
-      ctx.fillRect(22 + i * (heartSize + 8), 14, heartSize - 4, 4);
+      const hx = 20 + i * 32;
+      const filled = i < s.player.hp;
+      const c1 = filled ? "#ff2244" : "#333333";
+      const c2 = filled ? "#ff4466" : "#3a3a3a";
+      const c3 = filled ? "#cc1133" : "#2a2a2a";
+      // Heart shape (pixel art)
+      ctx.fillStyle = c1;
+      ctx.fillRect(hx + 2, 14, 6, 2);   // Left bump
+      ctx.fillRect(hx + 10, 14, 6, 2);  // Right bump
+      ctx.fillRect(hx + 1, 16, 16, 2);  // Wide middle
+      ctx.fillRect(hx + 2, 18, 14, 2);
+      ctx.fillRect(hx + 3, 20, 12, 2);
+      ctx.fillRect(hx + 4, 22, 10, 2);
+      ctx.fillRect(hx + 5, 24, 8, 2);
+      ctx.fillRect(hx + 6, 26, 6, 2);
+      ctx.fillRect(hx + 7, 28, 4, 2);
+      // Highlight
+      if (filled) {
+        ctx.fillStyle = c2;
+        ctx.fillRect(hx + 3, 14, 4, 2);
+        ctx.fillRect(hx + 2, 16, 6, 2);
+      }
+      // Shadow
+      ctx.fillStyle = c3;
+      ctx.fillRect(hx + 7, 26, 4, 2);
+      ctx.fillRect(hx + 7, 28, 4, 2);
     }
 
-    // Score
+    // Score with glow
+    ctx.fillStyle = "#ffcc0033";
+    ctx.fillRect(CANVAS_W - 140, 10, 130, 32);
     ctx.fillStyle = "#ffcc00";
     ctx.font = "bold 24px monospace";
     ctx.textAlign = "right";
@@ -398,46 +548,96 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
 
     // Timer
     const remaining = Math.max(0, 60 - s.elapsed);
-    ctx.fillStyle = remaining < 10 ? "#ff4444" : "#ffffff";
-    ctx.font = "bold 20px monospace";
+    const timerFlash = remaining < 10 && Math.floor(s.frameCount / 15) % 2 === 0;
+    ctx.fillStyle = remaining < 10 ? (timerFlash ? "#ff6666" : "#ff2222") : "#ffffff";
+    ctx.font = "bold 22px monospace";
     ctx.textAlign = "center";
     ctx.fillText(`${Math.ceil(remaining)}s`, CANVAS_W / 2, 36);
 
-    // Speed indicator
+    // Speed indicator with bar
+    const speedPct = Math.min(1, s.baseSpeed / 600);
+    ctx.fillStyle = "#222230";
+    ctx.fillRect(16, CANVAS_H - 28, 100, 10);
+    ctx.fillStyle = speedPct > 0.8 ? "#ff4444" : "#44ff88";
+    ctx.fillRect(16, CANVAS_H - 28, 100 * speedPct, 10);
     ctx.fillStyle = "#88ff88";
-    ctx.font = "12px monospace";
+    ctx.font = "11px monospace";
     ctx.textAlign = "left";
-    ctx.fillText(`${Math.floor(s.baseSpeed / 5)} km/h`, 20, CANVAS_H - 16);
+    ctx.fillText(`${Math.floor(s.baseSpeed / 5)} km/h`, 122, CANVAS_H - 19);
 
-    // Combo
+    // Combo (pulsing)
     if (s.player.dodgeCombo >= 2) {
+      const comboPulse = Math.sin(s.frameCount * 0.2) * 0.15 + 0.85;
+      ctx.globalAlpha = comboPulse;
+      // Combo background
+      ctx.fillStyle = "#ff44ff22";
+      ctx.fillRect(CANVAS_W / 2 - 60, 46, 120, 20);
       ctx.fillStyle = "#ff88ff";
       ctx.font = "bold 16px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(`${s.player.dodgeCombo}x COMBO`, CANVAS_W / 2, 60);
+      ctx.fillText(`${s.player.dodgeCombo}x COMBO`, CANVAS_W / 2, 62);
+      ctx.globalAlpha = 1;
     }
 
     ctx.textAlign = "left";
   }
 
   function drawGameOverOverlay(ctx: CanvasRenderingContext2D, s: InternalState): void {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+    // Dark overlay
+    ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-    ctx.fillStyle = "#ff4444";
-    ctx.font = "bold 52px monospace";
+
+    // Panel background
+    ctx.fillStyle = "#0a0a1a";
+    ctx.fillRect(CANVAS_W / 2 - 240, CANVAS_H / 2 - 90, 480, 200);
+    // Panel border
+    const borderColor = s.player.hp <= 0 ? "#ff444466" : "#00ff8866";
+    ctx.fillStyle = borderColor;
+    ctx.fillRect(CANVAS_W / 2 - 242, CANVAS_H / 2 - 92, 484, 2);
+    ctx.fillRect(CANVAS_W / 2 - 242, CANVAS_H / 2 + 108, 484, 2);
+    ctx.fillRect(CANVAS_W / 2 - 242, CANVAS_H / 2 - 92, 2, 202);
+    ctx.fillRect(CANVAS_W / 2 + 240, CANVAS_H / 2 - 92, 2, 202);
+
+    // Title
+    ctx.font = "bold 48px monospace";
     ctx.textAlign = "center";
     if (s.player.hp <= 0) {
-      ctx.fillText("WIPEOUT!", CANVAS_W / 2, CANVAS_H / 2 - 40);
+      // Glow behind text
+      ctx.fillStyle = "#ff222218";
+      ctx.fillRect(CANVAS_W / 2 - 160, CANVAS_H / 2 - 70, 320, 40);
+      ctx.fillStyle = "#ff4444";
+      ctx.fillText("WIPEOUT!", CANVAS_W / 2, CANVAS_H / 2 - 38);
     } else {
+      ctx.fillStyle = "#00ff8818";
+      ctx.fillRect(CANVAS_W / 2 - 160, CANVAS_H / 2 - 70, 320, 40);
       ctx.fillStyle = "#00ff88";
-      ctx.fillText("TIME'S UP!", CANVAS_W / 2, CANVAS_H / 2 - 40);
+      ctx.fillText("TIME'S UP!", CANVAS_W / 2, CANVAS_H / 2 - 38);
     }
+
+    // Score
     ctx.fillStyle = "#ffcc00";
-    ctx.font = "bold 28px monospace";
-    ctx.fillText(`Score: ${s.player.score}`, CANVAS_W / 2, CANVAS_H / 2 + 20);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "16px monospace";
-    ctx.fillText(`Dodged: ${s.obstaclesDodged}  Near-misses: ${s.nearMisses}  Hits: ${s.totalHits}`, CANVAS_W / 2, CANVAS_H / 2 + 60);
+    ctx.font = "bold 30px monospace";
+    ctx.fillText(`Score: ${s.player.score}`, CANVAS_W / 2, CANVAS_H / 2 + 16);
+
+    // Stats line
+    ctx.fillStyle = "#aaaaaa";
+    ctx.font = "14px monospace";
+    ctx.fillText(
+      `Dodged: ${s.obstaclesDodged}  |  Near-misses: ${s.nearMisses}  |  Hits: ${s.totalHits}`,
+      CANVAS_W / 2,
+      CANVAS_H / 2 + 52,
+    );
+
+    // Survival time
+    ctx.fillStyle = "#88ccff";
+    ctx.font = "12px monospace";
+    const surv = Math.min(60, Math.floor(s.elapsed * 10) / 10);
+    ctx.fillText(`Survived: ${surv}s  |  Top speed: ${Math.floor(s.topSpeed / 5)} km/h`, CANVAS_W / 2, CANVAS_H / 2 + 76);
+
+    // Scanlines on top
+    drawScanlines(ctx);
+    drawVignette(ctx);
+
     ctx.textAlign = "left";
   }
 

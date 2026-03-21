@@ -1,4 +1,5 @@
 // Saigon Rush — Game entities: Player, obstacles, road/background, particles
+// Polished neon-on-dark aesthetic with gradient sky, lit buildings, streetlights
 
 import type { GameObstacle } from "@shared/types";
 import { drawSprite, getSpriteForType, MOTORBIKE_SPRITE } from "./sprites";
@@ -64,7 +65,20 @@ export function playerHit(p: Player): void {
 export function drawPlayer(ctx: CanvasRenderingContext2D, p: Player, frameCount: number): void {
   // Flash when invincible (blink every 4 frames)
   if (p.invincible && Math.floor(frameCount / 4) % 2 === 0) return;
+
+  // Player glow effect (subtle cyan shadow underneath)
+  ctx.fillStyle = "#0088cc18";
+  ctx.fillRect(PLAYER_X - 28, p.y - 8, 50, 30);
+  ctx.fillStyle = "#0088cc10";
+  ctx.fillRect(PLAYER_X - 32, p.y - 4, 58, 24);
+
   drawSprite(ctx, MOTORBIKE_SPRITE, PLAYER_X - 20, p.y - 18, 1.1);
+
+  // Headlight beam (forward cone of light)
+  ctx.fillStyle = "#ffee5508";
+  ctx.fillRect(PLAYER_X + 18, p.y - 4, 40, 8);
+  ctx.fillStyle = "#ffee5504";
+  ctx.fillRect(PLAYER_X + 18, p.y - 8, 60, 16);
 }
 
 // ── Active Obstacle (runtime state) ───────────────────────
@@ -150,6 +164,16 @@ export function isObstacleOffScreen(o: ActiveObstacle): boolean {
 export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle): void {
   const sprite = getSpriteForType(o.data.type);
   const scale = o.pixelWidth / 40; // Normalize sprite to obstacle width
+
+  // Ground shadow beneath obstacle
+  ctx.fillStyle = "#00000030";
+  ctx.fillRect(
+    o.x + 4 * scale,
+    o.y + o.pixelHeight / 2 - 4 * scale,
+    o.pixelWidth - 8 * scale,
+    6 * scale,
+  );
+
   drawSprite(ctx, sprite, o.x, o.y - o.pixelHeight / 2, scale);
 
   // Label above obstacle
@@ -197,27 +221,65 @@ export interface Building {
   width: number;
   height: number;
   color: string;
+  windowSeed: number; // Deterministic seed for window placement
+}
+
+export interface Streetlight {
+  x: number;
+}
+
+export interface ShopSign {
+  x: number;
+  y: number;
+  width: number;
+  color: string;
 }
 
 export interface RoadState {
   buildings: Building[];
+  streetlights: Streetlight[];
+  shopSigns: ShopSign[];
   dashOffset: number;
   dustOffset: number;
 }
 
-const BUILDING_COLORS = ["#1a1a2e", "#16213e", "#0f3460", "#1a1033", "#2a1a3e"];
+const BUILDING_COLORS = ["#0e0e22", "#121233", "#0c1e40", "#140e28", "#1e1035", "#0a1530"];
+const SIGN_COLORS = ["#ff3355", "#ffaa22", "#33ff88", "#44aaff", "#ff55cc", "#ffdd00"];
+
+// Simple deterministic hash for window placement (avoids flickering)
+function hashWindows(seed: number, index: number): boolean {
+  const v = Math.sin(seed * 127.1 + index * 311.7) * 43758.5453;
+  return (v - Math.floor(v)) > 0.45;
+}
 
 export function createRoadState(): RoadState {
   const buildings: Building[] = [];
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 16; i++) {
     buildings.push({
-      x: i * 80 - 40,
-      width: 50 + Math.random() * 40,
-      height: 80 + Math.random() * 120,
+      x: i * 70 - 40,
+      width: 45 + Math.random() * 35,
+      height: 70 + Math.random() * 130,
       color: BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)],
+      windowSeed: Math.floor(Math.random() * 10000),
     });
   }
-  return { buildings, dashOffset: 0, dustOffset: 0 };
+
+  const streetlights: Streetlight[] = [];
+  for (let i = 0; i < 6; i++) {
+    streetlights.push({ x: i * 180 + 50 });
+  }
+
+  const shopSigns: ShopSign[] = [];
+  for (let i = 0; i < 8; i++) {
+    shopSigns.push({
+      x: i * 130 + 20 + Math.random() * 40,
+      y: 118 + Math.random() * 20,
+      width: 20 + Math.random() * 20,
+      color: SIGN_COLORS[Math.floor(Math.random() * SIGN_COLORS.length)],
+    });
+  }
+
+  return { buildings, streetlights, shopSigns, dashOffset: 0, dustOffset: 0 };
 }
 
 export function updateRoad(road: RoadState, baseSpeed: number, dt: number): void {
@@ -226,11 +288,31 @@ export function updateRoad(road: RoadState, baseSpeed: number, dt: number): void
     b.x -= baseSpeed * 0.2 * dt;
     if (b.x + b.width < -60) {
       b.x = CANVAS_W + 20 + Math.random() * 80;
-      b.width = 50 + Math.random() * 40;
-      b.height = 80 + Math.random() * 120;
+      b.width = 45 + Math.random() * 35;
+      b.height = 70 + Math.random() * 130;
       b.color = BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)];
+      b.windowSeed = Math.floor(Math.random() * 10000);
     }
   }
+
+  // Streetlights parallax (0.3x — between buildings and road)
+  for (const sl of road.streetlights) {
+    sl.x -= baseSpeed * 0.3 * dt;
+    if (sl.x < -20) {
+      sl.x = CANVAS_W + 30 + Math.random() * 60;
+    }
+  }
+
+  // Shop signs parallax (0.25x)
+  for (const ss of road.shopSigns) {
+    ss.x -= baseSpeed * 0.25 * dt;
+    if (ss.x + ss.width < -30) {
+      ss.x = CANVAS_W + 20 + Math.random() * 60;
+      ss.width = 20 + Math.random() * 20;
+      ss.color = SIGN_COLORS[Math.floor(Math.random() * SIGN_COLORS.length)];
+    }
+  }
+
   // Dashed line offset (1.0x)
   road.dashOffset = (road.dashOffset + baseSpeed * dt) % 40;
   // Dust layer (1.3x)
@@ -238,55 +320,170 @@ export function updateRoad(road: RoadState, baseSpeed: number, dt: number): void
 }
 
 export function drawRoad(ctx: CanvasRenderingContext2D, road: RoadState): void {
-  // Sky gradient (simple two-tone)
-  ctx.fillStyle = "#0d0d2b";
-  ctx.fillRect(0, 0, CANVAS_W, 130);
-  ctx.fillStyle = "#1a0a2e";
-  ctx.fillRect(0, 130, CANVAS_W, 20);
+  // ── Sky gradient (deep navy → purple → warm orange at horizon) ──
+  // Top band: deep navy
+  ctx.fillStyle = "#06061a";
+  ctx.fillRect(0, 0, CANVAS_W, 30);
+  // Upper mid: dark navy-purple
+  ctx.fillStyle = "#0a0a28";
+  ctx.fillRect(0, 30, CANVAS_W, 25);
+  // Mid: purple tint
+  ctx.fillStyle = "#120a30";
+  ctx.fillRect(0, 55, CANVAS_W, 20);
+  // Lower mid: deep purple
+  ctx.fillStyle = "#1a0e38";
+  ctx.fillRect(0, 75, CANVAS_W, 20);
+  // Near horizon: purple-warm
+  ctx.fillStyle = "#2a1040";
+  ctx.fillRect(0, 95, CANVAS_W, 15);
+  // Horizon: warm orange glow
+  ctx.fillStyle = "#3a1535";
+  ctx.fillRect(0, 110, CANVAS_W, 10);
+  ctx.fillStyle = "#4a2030";
+  ctx.fillRect(0, 120, CANVAS_W, 10);
+  ctx.fillStyle = "#5a2a28";
+  ctx.fillRect(0, 130, CANVAS_W, 10);
+  ctx.fillStyle = "#6a3520";
+  ctx.fillRect(0, 140, CANVAS_W, 10);
 
-  // Building silhouettes
+  // ── Stars (tiny white dots in upper sky) ──
+  ctx.fillStyle = "#ffffff33";
+  // Fixed star positions (no flicker)
+  const stars = [42, 130, 215, 310, 445, 520, 640, 730, 810, 880, 920, 70, 360, 600];
+  for (let i = 0; i < stars.length; i++) {
+    const sx = stars[i];
+    const sy = 8 + (i * 7) % 60;
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+
+  // ── Building silhouettes ──
   for (const b of road.buildings) {
+    // Main building body
     ctx.fillStyle = b.color;
     ctx.fillRect(b.x, 150 - b.height, b.width, b.height);
-    // Lit windows
-    ctx.fillStyle = "#ffdd4422";
-    for (let wy = 150 - b.height + 10; wy < 140; wy += 20) {
-      for (let wx = b.x + 8; wx < b.x + b.width - 8; wx += 16) {
-        if (Math.random() > 0.4) {
-          ctx.fillStyle = Math.random() > 0.5 ? "#ffdd4433" : "#ffaa2222";
-          ctx.fillRect(wx, wy, 6, 8);
+
+    // Building edge highlight (left side)
+    ctx.fillStyle = "#ffffff06";
+    ctx.fillRect(b.x, 150 - b.height, 1, b.height);
+
+    // Building top edge
+    ctx.fillStyle = "#ffffff08";
+    ctx.fillRect(b.x, 150 - b.height, b.width, 1);
+
+    // Deterministic lit windows (no flickering)
+    let winIdx = 0;
+    for (let wy = 150 - b.height + 8; wy < 142; wy += 14) {
+      for (let wx = b.x + 6; wx < b.x + b.width - 6; wx += 12) {
+        if (hashWindows(b.windowSeed, winIdx)) {
+          // Window lit — warm yellow or cool white
+          const warm = hashWindows(b.windowSeed, winIdx + 1000);
+          ctx.fillStyle = warm ? "#ffcc4430" : "#aaddff20";
+          ctx.fillRect(wx, wy, 5, 7);
+          // Window frame (subtle)
+          ctx.fillStyle = "#ffffff08";
+          ctx.fillRect(wx, wy, 5, 1);
+          ctx.fillRect(wx, wy, 1, 7);
         }
+        winIdx++;
       }
     }
   }
 
-  // Road surface
-  ctx.fillStyle = "#2a2a2a";
+  // ── Vietnamese shop signs ──
+  for (const ss of road.shopSigns) {
+    // Sign background
+    ctx.fillStyle = ss.color + "88";
+    ctx.fillRect(ss.x, ss.y, ss.width, 10);
+    // Sign glow
+    ctx.fillStyle = ss.color + "18";
+    ctx.fillRect(ss.x - 2, ss.y - 2, ss.width + 4, 14);
+    // "Text" bars on sign
+    ctx.fillStyle = "#ffffff55";
+    ctx.fillRect(ss.x + 3, ss.y + 3, ss.width * 0.6, 2);
+    ctx.fillRect(ss.x + 3, ss.y + 6, ss.width * 0.4, 1);
+  }
+
+  // ── Streetlights ──
+  for (const sl of road.streetlights) {
+    // Pole
+    ctx.fillStyle = "#44444488";
+    ctx.fillRect(sl.x, 100, 2, 52);
+    // Arm extending over road
+    ctx.fillStyle = "#44444488";
+    ctx.fillRect(sl.x - 8, 100, 12, 2);
+    // Light housing
+    ctx.fillStyle = "#666666";
+    ctx.fillRect(sl.x - 6, 98, 8, 3);
+    // Light glow (warm yellow circle approximation)
+    ctx.fillStyle = "#ffdd4412";
+    ctx.fillRect(sl.x - 16, 96, 28, 20);
+    ctx.fillStyle = "#ffdd4418";
+    ctx.fillRect(sl.x - 10, 98, 16, 12);
+    ctx.fillStyle = "#ffee6630";
+    ctx.fillRect(sl.x - 5, 100, 6, 4);
+    // Light cone on road
+    ctx.fillStyle = "#ffdd4406";
+    ctx.fillRect(sl.x - 30, 152, 56, 20);
+  }
+
+  // ── Road surface ──
+  // Main road with subtle blue tint
+  ctx.fillStyle = "#222230";
   ctx.fillRect(0, 150, CANVAS_W, 380);
 
-  // Road edge lines
-  ctx.fillStyle = "#555555";
+  // Subtle road texture variation (horizontal bands)
+  ctx.fillStyle = "#1e1e2c";
+  ctx.fillRect(0, 160, CANVAS_W, 2);
+  ctx.fillRect(0, 200, CANVAS_W, 1);
+  ctx.fillStyle = "#262636";
+  ctx.fillRect(0, 280, CANVAS_W, 1);
+  ctx.fillRect(0, 360, CANVAS_W, 1);
+  ctx.fillStyle = "#1e1e2c";
+  ctx.fillRect(0, 440, CANVAS_W, 1);
+  ctx.fillRect(0, 500, CANVAS_W, 2);
+
+  // ── Road edge lines (solid white) ──
+  ctx.fillStyle = "#666666";
   ctx.fillRect(0, 150, CANVAS_W, 3);
   ctx.fillRect(0, 527, CANVAS_W, 3);
+  // Inner edge highlight
+  ctx.fillStyle = "#444450";
+  ctx.fillRect(0, 153, CANVAS_W, 1);
 
-  // Lane dividers (dashed)
-  ctx.fillStyle = "#555555";
-  const laneLines = [250, 390];
+  // ── Center divider (double yellow) ──
+  const centerY = 318;
+  for (let dx = -road.dashOffset; dx < CANVAS_W; dx += 40) {
+    ctx.fillStyle = "#ccaa22";
+    ctx.fillRect(dx, centerY - 2, 24, 2);
+    ctx.fillRect(dx, centerY + 2, 24, 2);
+  }
+
+  // ── Lane dividers (dashed white, lighter) ──
+  ctx.fillStyle = "#55555588";
+  const laneLines = [248, 388];
   for (const ly of laneLines) {
     for (let dx = -road.dashOffset; dx < CANVAS_W; dx += 40) {
-      ctx.fillRect(dx, ly - 1, 20, 2);
+      ctx.fillRect(dx, ly - 1, 18, 2);
     }
   }
 
-  // Bottom area (sidewalk)
-  ctx.fillStyle = "#1a1a1a";
+  // ── Bottom area (sidewalk) ──
+  ctx.fillStyle = "#181820";
   ctx.fillRect(0, 530, CANVAS_W, 110);
+  // Sidewalk edge / curb
+  ctx.fillStyle = "#333340";
+  ctx.fillRect(0, 530, CANVAS_W, 2);
+  // Sidewalk texture
+  ctx.fillStyle = "#1c1c26";
+  ctx.fillRect(0, 545, CANVAS_W, 1);
+  ctx.fillRect(0, 575, CANVAS_W, 1);
+  ctx.fillRect(0, 605, CANVAS_W, 1);
 
-  // Dust particles (1.3x speed layer)
-  ctx.fillStyle = "#ffffff08";
-  for (let i = 0; i < 8; i++) {
+  // ── Road dust / grit particles (subtle, 1.3x speed) ──
+  ctx.fillStyle = "#ffffff06";
+  for (let i = 0; i < 10; i++) {
     const dx = ((i * 137 + road.dustOffset * 2) % CANVAS_W) - 10;
-    const dy = 160 + (i * 53) % 360;
+    const dy = 158 + (i * 53) % 365;
     ctx.fillRect(dx, dy, 2 + (i % 3), 1);
   }
 }
@@ -313,7 +510,7 @@ export function createDustParticle(x: number, y: number): Particle {
     life: 0.3 + Math.random() * 0.3,
     maxLife: 0.6,
     size: 2 + Math.random() * 3,
-    color: "#aa9977",
+    color: "#887766",
   };
 }
 
@@ -321,18 +518,18 @@ export function createSpeedLine(_y: number): Particle {
   return {
     x: CANVAS_W,
     y: 160 + Math.random() * 360,
-    vx: -800 - Math.random() * 400,
+    vx: -1000 - Math.random() * 600,
     vy: 0,
-    life: 0.15 + Math.random() * 0.1,
-    maxLife: 0.25,
+    life: 0.12 + Math.random() * 0.08,
+    maxLife: 0.2,
     size: 1,
-    color: "#ffffff44",
+    color: "#44ddff",
   };
 }
 
 export function createHitParticle(x: number, y: number): Particle {
   const angle = Math.random() * Math.PI * 2;
-  const speed = 80 + Math.random() * 120;
+  const speed = 100 + Math.random() * 150;
   return {
     x,
     y,
@@ -341,7 +538,7 @@ export function createHitParticle(x: number, y: number): Particle {
     life: 0.3 + Math.random() * 0.2,
     maxLife: 0.5,
     size: 3 + Math.random() * 4,
-    color: "#ff4444",
+    color: Math.random() > 0.5 ? "#ff4444" : "#ff8822",
   };
 }
 
