@@ -102,25 +102,25 @@ export function Results() {
           {/* Rating stamp */}
           <div className="relative px-5 py-5 flex items-center justify-center" style={{
             borderBottom: `1px solid ${rd.color}22`,
+            minHeight: 100,
           }}>
-            {/* Star field */}
-            <div className="flex gap-2 items-center">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <span key={i} style={{
-                  fontSize: "1.6rem",
-                  color: i < rd.stars ? rd.color : "#ffffff15",
-                  textShadow: i < rd.stars ? `0 0 8px ${rd.color}` : "none",
-                  transition: "all 0.3s",
-                }}>
-                  ★
-                </span>
-              ))}
-            </div>
-
-            {/* Rating title (stamped) */}
-            <div className="absolute" style={{
+            {/* Rating title + stars (stamped together) */}
+            <div className="flex flex-col items-center" style={{
               animation: "stamp-slam 0.5s 0.3s ease-out both",
             }}>
+              {/* Star field */}
+              <div className="flex gap-2 items-center mb-1">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <span key={i} style={{
+                    fontSize: "1.6rem",
+                    color: i < rd.stars ? rd.color : "#ffffff15",
+                    textShadow: i < rd.stars ? `0 0 8px ${rd.color}` : "none",
+                  }}>
+                    ★
+                  </span>
+                ))}
+              </div>
+
               <div className="font-pixel px-4 py-2" style={{
                 fontSize: "clamp(1.2rem, 4vw, 2rem)",
                 color: rd.color,
