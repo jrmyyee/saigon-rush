@@ -18,6 +18,8 @@ interface VotableObstacle {
 export function Audience() {
   const [params] = useSearchParams();
   const sessionId = params.get("session") ?? "";
+  const [name, setName] = useState("");
+  const [joined, setJoined] = useState(false);
   const [text, setText] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -62,7 +64,7 @@ export function Audience() {
   const submit = (value?: string) => {
     const msg = (value || text).trim();
     if (!msg || cooldown > 0) return;
-    wsRef.current?.send({ type: "suggestion", text: msg });
+    wsRef.current?.send({ type: "suggestion", text: msg, senderName: name || undefined });
     setText("");
     setError("");
     setGenerating(true);
@@ -79,12 +81,41 @@ export function Audience() {
     return <div className="w-full h-full flex items-center justify-center bg-saigon-dark"><p className="text-neon-red font-pixel text-sm">No session ID</p></div>;
   }
 
+  // Name entry screen
+  if (!joined) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-saigon-dark p-6 gap-5">
+        <h1 className="font-pixel text-neon-green text-2xl" style={{ textShadow: "0 0 12px #00ff88" }}>SAIGON RUSH</h1>
+        <p className="text-white/60 text-sm text-center">Enter your name to join the chaos</p>
+        <input
+          className="bg-saigon-road text-white text-center text-lg px-4 py-3 rounded border border-neon-yellow/40 focus:border-neon-yellow outline-none w-full max-w-xs"
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && setJoined(true)}
+          maxLength={20}
+          autoFocus
+        />
+        <button
+          className="bg-neon-yellow text-saigon-dark font-bold px-8 py-3 rounded font-pixel text-sm disabled:opacity-40"
+          onClick={() => setJoined(true)}
+          disabled={!name.trim()}
+        >
+          JOIN
+        </button>
+      </div>
+    );
+  }
+
   // Sort votables by votes descending for display
   const sortedVotables = [...votables].sort((a, b) => b.votes - a.votes);
 
   return (
     <div className="w-full h-full flex flex-col bg-saigon-dark p-4 gap-3 overflow-hidden">
-      <h1 className="font-pixel text-neon-yellow text-xl text-center">SEND CHAOS</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="font-pixel text-neon-yellow text-xl">SEND CHAOS</h1>
+        <span className="text-white/40 text-xs">{name}</span>
+      </div>
 
       {/* Inspiration chips */}
       <div className="flex flex-wrap gap-1.5 justify-center">

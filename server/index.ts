@@ -21,7 +21,7 @@ const sessions = new Map<string, Session>();
 const rateLimits = new Map<string, number>();
 
 // Vote tracking per session
-interface VotableObstacle { id: string; label: string; color: string; votes: number }
+interface VotableObstacle { id: string; label: string; color: string; votes: number; senderName?: string }
 const sessionVotes = new Map<string, VotableObstacle[]>(); // sessionId → obstacles
 const userVotes = new Map<string, Set<string>>(); // odId → set of user IDs who voted
 
@@ -396,12 +396,13 @@ const server = Bun.serve<SocketData>({
         // SEND IMMEDIATELY after Phase 1 — don't wait for sprite/SFX generation
         // Obstacle renders with Phase 1 fallback sprite (8-12 rects), then upgrades progressively
         pub(`game:${sessionId}`, { type: "new_obstacle", obstacle });
-        pub(`audience:${sessionId}`, { type: "suggestion_accepted", original: msg.text, result: obstacle });
+        const senderName = msg.senderName || undefined;
+        pub(`audience:${sessionId}`, { type: "suggestion_accepted", original: msg.text, result: obstacle, senderName });
 
         // Track as votable obstacle
         if (!sessionVotes.has(sessionId)) sessionVotes.set(sessionId, []);
         const votables = sessionVotes.get(sessionId)!;
-        votables.push({ id: obstacle.id, label: obstacle.label, color: obstacle.color, votes: 0 });
+        votables.push({ id: obstacle.id, label: obstacle.label, color: obstacle.color, votes: 0, senderName });
         // Keep only last 20 obstacles
         if (votables.length > 20) votables.shift();
         // Broadcast updated vote state

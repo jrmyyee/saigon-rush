@@ -4,9 +4,9 @@ export type ClientRole = "display" | "controller" | "audience";
 
 export type WSMessage =
   | { type: "input"; action: InputAction }
-  | { type: "suggestion"; text: string }
+  | { type: "suggestion"; text: string; senderName?: string }
   | { type: "new_obstacle"; obstacle: GameObstacle }
-  | { type: "suggestion_accepted"; original: string; result: GameObstacle }
+  | { type: "suggestion_accepted"; original: string; result: GameObstacle; senderName?: string }
   | { type: "suggestion_rejected"; reason: string }
   | { type: "game_state"; state: GameState }
   | { type: "player_joined"; role: ClientRole }
@@ -89,6 +89,7 @@ export interface SuggestionFeedItem {
   color?: string;
   obstacleId?: string;
   votes?: number;
+  senderName?: string;
 }
 
 export interface GameStats {
