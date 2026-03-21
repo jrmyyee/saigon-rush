@@ -454,9 +454,9 @@ export function GameScreen() {
                 AUDIENCE JOIN
               </p>
 
-              {/* QR with glow border */}
-              <div style={{ padding:6, background:"#0a0a0f", boxShadow:"0 0 20px #ffdd0044" }}>
-                <QRCodeSVG value={audienceUrl} size={150} bgColor="#0a0a0f" fgColor="#ffdd00" />
+              {/* QR with glow border — large enough to scan from distance */}
+              <div style={{ padding:8, background:"#0a0a0f", boxShadow:"0 0 24px #ffdd0044" }}>
+                <QRCodeSVG value={audienceUrl} size={220} bgColor="#0a0a0f" fgColor="#ffdd00" />
               </div>
 
               <p className="font-pixel" style={{ fontSize:"0.55rem", color:"#ffdd0099", letterSpacing:"0.15em" }}>
