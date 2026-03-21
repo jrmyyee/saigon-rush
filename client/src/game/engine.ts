@@ -534,9 +534,10 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   function endGame(): void {
     state.phase = "game_over";
     audio.stopEngine();
-    audio.stopMusic();
+    audio.gameOverSlowdown(); // Slow descending melody instead of abrupt silence
     const stats = buildStats();
-    options?.onGameOver?.(stats);
+    // Delay navigation to results so the game-over melody plays out
+    setTimeout(() => options?.onGameOver?.(stats), 5000);
   }
 
   function buildStats(): GameStats {

@@ -684,9 +684,118 @@ export class AudioManager {
     this.sfxGain.connect(this.masterGain);
   }
 
+  // ── Lobby Music (atmospheric, slower Vietnamese vibe) ────
+  private lobbyPlaying = false;
+  private lobbyTimeouts: number[] = [];
+
+  startLobbyMusic(): void {
+    if (this.lobbyPlaying) return;
+    this.init();
+    this.lobbyPlaying = true;
+    this.playLobbyLoop();
+  }
+
+  stopLobbyMusic(): void {
+    this.lobbyPlaying = false;
+    for (const t of this.lobbyTimeouts) clearTimeout(t);
+    this.lobbyTimeouts = [];
+  }
+
+  private playLobbyLoop(): void {
+    if (!this.lobbyPlaying) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    const bpm = 90; // Half the game speed — chill, atmospheric
+    const beatMs = (60 / bpm) * 1000;
+
+    // Vietnamese Nam mode — same scale, dreamy and slow
+    const C4 = 261.63, D4 = 293.66, F4 = 349.23, G4 = 392.00, Bb4 = 466.16;
+    const C5 = 523.25;
+    const C3 = 130.81, F3 = 174.61, G3 = 196.00, Bb3 = 233.08;
+
+    const sched = (beat: number, fn: () => void) => {
+      const tid = setTimeout(() => { if (this.lobbyPlaying) fn(); }, beat * beatMs) as unknown as number;
+      this.lobbyTimeouts.push(tid);
+    };
+    const lead = (beat: number, freq: number, dur: number, vol: number) =>
+      sched(beat, () => this.playVibratoTone(freq, dur, vol));
+    const bass = (beat: number, freq: number, dur: number, vol: number) =>
+      sched(beat, () => this.playTone(freq, dur, "triangle", vol));
+
+    // Sparse, dreamy melody — lots of space
+    lead(0, G4, 0.4, 0.05);
+    lead(2, Bb4, 0.5, 0.06);
+    lead(4, C5, 0.6, 0.06);
+    lead(6, Bb4, 0.4, 0.05);
+    lead(8, G4, 0.5, 0.06);
+    lead(10, F4, 0.6, 0.05);
+    lead(12, D4, 0.4, 0.05);
+    lead(14, F4, 0.5, 0.06);
+    lead(16, G4, 0.6, 0.06);
+    lead(18, Bb4, 0.4, 0.05);
+    lead(20, G4, 0.5, 0.05);
+    lead(22, F4, 0.4, 0.05);
+    lead(24, C4, 0.8, 0.06);
+    lead(28, D4, 0.5, 0.05);
+    lead(30, F4, 0.6, 0.06);
+
+    // Slow bass — one note every 4 beats
+    bass(0, C3, 0.8, 0.06);
+    bass(4, G3, 0.8, 0.06);
+    bass(8, F3, 0.8, 0.06);
+    bass(12, Bb3, 0.8, 0.05);
+    bass(16, C3, 0.8, 0.06);
+    bass(20, G3, 0.8, 0.06);
+    bass(24, F3, 0.8, 0.06);
+    bass(28, C3, 0.8, 0.05);
+
+    // Loop after 32 beats
+    const loopTid = setTimeout(() => this.playLobbyLoop(), 32 * beatMs) as unknown as number;
+    this.lobbyTimeouts.push(loopTid);
+  }
+
+  // ── Game Over Slowdown ─────────────────────────────────────
+  /** Slow music to a crawl and play a descending game-over melody */
+  gameOverSlowdown(): void {
+    // Stop the game music loop from scheduling new notes
+    this.musicPlaying = false;
+    for (const t of this.musicTimeouts) clearTimeout(t);
+    this.musicTimeouts = [];
+
+    // Fade master volume down over 1.5s
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, this.ctx.currentTime);
+      this.masterGain.gain.linearRampToValueAtTime(0.12, this.ctx.currentTime + 1.5);
+    }
+
+    // Play descending game-over melody — slow, sad, Vietnamese-flavored
+    const Bb4 = 466.16, G4 = 392.00, F4 = 349.23, D4 = 293.66, C4 = 261.63;
+    const C3 = 130.81;
+
+    // Descending lament
+    setTimeout(() => this.playVibratoTone(Bb4, 0.5, 0.07), 200);
+    setTimeout(() => this.playVibratoTone(G4, 0.5, 0.07), 600);
+    setTimeout(() => this.playVibratoTone(F4, 0.6, 0.06), 1000);
+    setTimeout(() => this.playVibratoTone(D4, 0.8, 0.06), 1500);
+    setTimeout(() => {
+      this.playVibratoTone(C4, 1.2, 0.07);
+      this.playTone(C3, 1.5, "triangle", 0.06); // Deep bass resolution
+    }, 2200);
+
+    // Restore volume after melody for the results screen transition
+    setTimeout(() => {
+      if (this.masterGain && this.ctx) {
+        this.masterGain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+        this.masterGain.gain.linearRampToValueAtTime(0.35, this.ctx.currentTime + 0.5);
+      }
+    }, 4000);
+  }
+
   destroy(): void {
     this.stopEngine();
     this.stopMusic();
+    this.stopLobbyMusic();
     // Clear all proactive cleanup timeouts
     for (const tid of this.activeTimeouts) clearTimeout(tid);
     this.activeTimeouts.clear();

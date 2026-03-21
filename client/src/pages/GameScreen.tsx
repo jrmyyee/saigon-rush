@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { createWSClient } from "../lib/ws";
 import { createGame } from "../game/engine";
+import { AudioManager } from "../game/audio";
 import type { GameStats, SuggestionFeedItem, WSMessage } from "@shared/types";
 import type { GameAPI } from "../game/engine";
 
@@ -35,10 +36,39 @@ export function GameScreen() {
   const [feed, setFeed] = useState<SuggestionFeedItem[]>([]);
   const [audienceCount, setAudienceCount] = useState(0);
   const [allVotes, setAllVotes] = useState<Array<{ id: string; label: string; color: string; votes: number }>>([]);
+  const [lobbyMusicStarted, setLobbyMusicStarted] = useState(false);
   const wsRef = useRef<ReturnType<typeof createWSClient> | null>(null);
+  const lobbyAudioRef = useRef<AudioManager | null>(null);
 
   const baseUrl = window.location.origin;
   const audienceUrl = `${baseUrl}/audience?session=${sessionId}`;
+
+  // Start lobby music on first user interaction (required by browser autoplay policy)
+  useEffect(() => {
+    if (phase !== "lobby") return;
+    const startLobbyAudio = () => {
+      if (lobbyAudioRef.current || lobbyMusicStarted) return;
+      const audio = new AudioManager();
+      lobbyAudioRef.current = audio;
+      audio.startLobbyMusic();
+      setLobbyMusicStarted(true);
+    };
+    window.addEventListener("click", startLobbyAudio, { once: true });
+    window.addEventListener("keydown", startLobbyAudio, { once: true });
+    return () => {
+      window.removeEventListener("click", startLobbyAudio);
+      window.removeEventListener("keydown", startLobbyAudio);
+    };
+  }, [phase, lobbyMusicStarted]);
+
+  // Stop lobby music when game starts
+  useEffect(() => {
+    if (phase === "playing" && lobbyAudioRef.current) {
+      lobbyAudioRef.current.stopLobbyMusic();
+      lobbyAudioRef.current.destroy();
+      lobbyAudioRef.current = null;
+    }
+  }, [phase]);
 
   // Mount game engine when phase is playing
   useEffect(() => {
