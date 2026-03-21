@@ -20,6 +20,11 @@ interface Session {
 const sessions = new Map<string, Session>();
 const rateLimits = new Map<string, number>();
 
+// Vote tracking per session
+interface VotableObstacle { id: string; label: string; color: string; votes: number }
+const sessionVotes = new Map<string, VotableObstacle[]>(); // sessionId → obstacles
+const userVotes = new Map<string, Set<string>>(); // odId → set of user IDs who voted
+
 const corsHeaders = (): Record<string, string> => ({
   "Access-Control-Allow-Origin": CLIENT_URL,
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -391,6 +396,15 @@ const server = Bun.serve<SocketData>({
         pub(`game:${sessionId}`, { type: "new_obstacle", obstacle });
         pub(`audience:${sessionId}`, { type: "suggestion_accepted", original: msg.text, result: obstacle });
 
+        // Track as votable obstacle
+        if (!sessionVotes.has(sessionId)) sessionVotes.set(sessionId, []);
+        const votables = sessionVotes.get(sessionId)!;
+        votables.push({ id: obstacle.id, label: obstacle.label, color: obstacle.color, votes: 0 });
+        // Keep only last 20 obstacles
+        if (votables.length > 20) votables.shift();
+        // Broadcast updated vote state
+        pub(`audience:${sessionId}`, { type: "vote_update", votes: votables });
+
         // PHASE 2: Generate detailed sprite via Claude Opus (background, progressive enhancement)
         const obstacleId = obstacle.id;
         const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T | undefined> =>
@@ -409,6 +423,27 @@ const server = Bun.serve<SocketData>({
             pub(`game:${sessionId}`, { type: "obstacle_sfx_ready", obstacleId, soundEffectAudio });
           }
         }).catch(() => {});
+        return;
+      }
+
+      // Audience -> vote on obstacle
+      if (role === "audience" && msg.type === "vote") {
+        const votables = sessionVotes.get(sessionId);
+        if (!votables) return;
+        // Prevent double-voting by same user on same obstacle
+        const voteKey = `${id}:${msg.obstacleId}`;
+        if (!userVotes.has(voteKey)) {
+          userVotes.set(voteKey, new Set());
+        }
+        const voted = userVotes.get(voteKey)!;
+        if (voted.has(id)) return;
+        voted.add(id);
+        const ob = votables.find(v => v.id === msg.obstacleId);
+        if (ob) {
+          ob.votes++;
+          pub(`audience:${sessionId}`, { type: "vote_update", votes: votables });
+          pub(`game:${sessionId}`, { type: "vote_update", votes: votables });
+        }
         return;
       }
 

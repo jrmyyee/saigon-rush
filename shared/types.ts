@@ -16,7 +16,9 @@ export type WSMessage =
   | { type: "session_info"; sessionId: string; displayUrl: string; controlUrl: string; audienceUrl: string }
   | { type: "obstacle_sprite_ready"; obstacleId: string; obstacleType?: string; spriteData: Array<{ x: number; y: number; w: number; h: number; c: string }> }
   | { type: "obstacle_image_ready"; obstacleId: string; imageUrl: string }
-  | { type: "obstacle_sfx_ready"; obstacleId: string; soundEffectAudio: string };
+  | { type: "obstacle_sfx_ready"; obstacleId: string; soundEffectAudio: string }
+  | { type: "vote"; obstacleId: string }
+  | { type: "vote_update"; votes: Array<{ id: string; label: string; color: string; votes: number }> };
 
 export type InputAction = "lane_up" | "lane_down" | "boost";
 
@@ -84,6 +86,8 @@ export interface SuggestionFeedItem {
   timestamp: number;
   spriteData?: Array<{ x: number; y: number; w: number; h: number; c: string }>;
   color?: string;
+  obstacleId?: string;
+  votes?: number;
 }
 
 export interface GameStats {

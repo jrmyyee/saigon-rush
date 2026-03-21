@@ -6,15 +6,34 @@ import { createGame } from "../game/engine";
 import type { GameStats, SuggestionFeedItem, WSMessage } from "@shared/types";
 import type { GameAPI } from "../game/engine";
 
+function SpritePreview({ spriteData }: { spriteData: SuggestionFeedItem['spriteData'] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx || !spriteData?.length) return;
+    ctx.clearRect(0, 0, 80, 60);
+    const scale = 1.2;
+    for (const { x, y, w, h, c } of spriteData) {
+      ctx.fillStyle = c;
+      ctx.fillRect(x * scale + 10, y * scale + 20, w * scale, h * scale);
+    }
+  }, [spriteData]);
+  if (!spriteData?.length) return null;
+  return <canvas ref={canvasRef} width={80} height={60} className="block" />;
+}
+
 export function GameScreen() {
   const [params] = useSearchParams();
   const testMode = params.get("test") === "1";
-  const sessionId = useMemo(() => Math.random().toString(36).slice(2, 6).toUpperCase(), []);
+  const sessionId = useMemo(() => {
+    return params.get("session") || Math.random().toString(36).slice(2, 6).toUpperCase();
+  }, []);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameAPI | null>(null);
   const navigate = useNavigate();
   const [phase, setPhase] = useState<"waiting" | "playing" | "game_over">("waiting");
   const [feed, setFeed] = useState<SuggestionFeedItem[]>([]);
+  const [topVoted, setTopVoted] = useState<{ label: string; votes: number; color: string } | null>(null);
 
   const baseUrl = window.location.origin;
   const controlUrl = `${baseUrl}/control?session=${sessionId}`;
@@ -45,11 +64,24 @@ export function GameScreen() {
         gameRef.current.addObstacle(msg.obstacle);
       }
       if (msg.type === "suggestion_accepted") {
-        setFeed((f) => [{ text: msg.original, result: msg.result.label, timestamp: Date.now() }, ...f].slice(0, 5));
+        setFeed((f) => [{
+          text: msg.original,
+          result: msg.result.label,
+          timestamp: Date.now(),
+          spriteData: msg.result.spriteData,
+          color: msg.result.color,
+        }, ...f].slice(0, 5));
       }
-      // DALL-E image arrived (async, after obstacle already spawned)
-      if (msg.type === "obstacle_image_ready" && gameRef.current) {
-        gameRef.current.updateObstacleImage(msg.obstacleId, msg.imageUrl);
+      // Claude Opus high-quality sprite arrived (progressive enhancement)
+      if (msg.type === "obstacle_sprite_ready" && gameRef.current) {
+        gameRef.current.updateObstacleSpriteData(msg.obstacleId, msg.spriteData, msg.obstacleType);
+      }
+      // Vote update — track audience favorite
+      if (msg.type === "vote_update") {
+        const sorted = [...msg.votes].sort((a: any, b: any) => b.votes - a.votes);
+        if (sorted[0]?.votes > 0) {
+          setTopVoted({ label: sorted[0].label, votes: sorted[0].votes, color: sorted[0].color });
+        }
       }
       // ElevenLabs SFX arrived
       if (msg.type === "obstacle_sfx_ready" && gameRef.current) {
@@ -109,8 +141,8 @@ export function GameScreen() {
 
   return (
     <div className="w-full h-full flex bg-saigon-dark">
-      <div className="flex-1 flex items-center justify-center relative">
-        <canvas ref={canvasRef} width={960} height={640} className="max-w-full max-h-full" style={{ imageRendering: "pixelated" }} />
+      <div className="flex-1 flex items-center justify-center relative scanlines">
+        <canvas ref={canvasRef} width={960} height={640} className="max-w-full max-h-full border-2 border-neon-green/40 shadow-[0_0_40px_rgba(0,255,136,0.15)]" style={{ imageRendering: "pixelated" }} />
         <div className="absolute bottom-2 left-2 bg-saigon-dark/80 px-2 py-1 rounded">
           <p className="text-white/40 text-[9px] font-pixel">AUDIENCE: {audienceUrl.replace(window.location.origin, '...')}</p>
         </div>
@@ -121,11 +153,23 @@ export function GameScreen() {
           <QRCodeSVG value={audienceUrl} size={80} bgColor="#1a1a2e" fgColor="#ffdd00" />
           <p className="text-white/40 text-[8px] mt-1">Scan to send chaos</p>
         </div>
+        {topVoted && (
+          <div className="bg-saigon-dark/80 rounded px-2 py-1.5 border border-neon-yellow/30">
+            <p className="text-neon-yellow font-pixel text-[8px]">AUDIENCE FAVORITE</p>
+            <p className="text-white text-sm" style={{ color: topVoted.color }}>{topVoted.label}</p>
+            <p className="text-neon-yellow text-[10px]">+{topVoted.votes} votes</p>
+          </div>
+        )}
         {feed.length === 0 && <p className="text-white/30 text-[9px] mt-2">Waiting for suggestions...</p>}
         {feed.map((item, i) => (
-          <div key={i} className="bg-saigon-dark/60 rounded px-2 py-1">
+          <div key={i} className="bg-saigon-dark/60 rounded px-2 py-1 relative group">
             <p className="text-white/50 text-xs truncate">{item.text}</p>
             <p className="text-neon-green text-sm">{item.result}</p>
+            {item.spriteData && (
+              <div className="absolute hidden group-hover:block bottom-full left-0 mb-1 bg-saigon-dark border border-neon-green/30 rounded p-1 z-10">
+                <SpritePreview spriteData={item.spriteData} />
+              </div>
+            )}
           </div>
         ))}
       </div>
