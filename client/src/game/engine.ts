@@ -437,10 +437,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     for (const a of state.announcements) a.timer -= dt;
     state.announcements = state.announcements.filter((a) => a.timer > 0);
 
-    // Timer game over (60-second rounds, disabled in test mode)
-    if (!testMode && state.elapsed >= 60) {
-      endGame();
-    }
+    // Game ends only when HP hits 0 — no time limit
   }
 
   function spawnNextObstacle(): void {
@@ -557,7 +554,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       nearMisses: state.nearMisses,
       topSpeed: Math.floor(state.topSpeed),
       totalHits: state.totalHits,
-      survivalTime: Math.min(60, Math.floor(state.elapsed * 10) / 10),
+      survivalTime: Math.floor(state.elapsed * 10) / 10,
       rating,
     };
   }
@@ -894,13 +891,11 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     ctx.textAlign = "right";
     ctx.fillText(`${s.player.score}`, CANVAS_W - 20, 36);
 
-    // Timer
-    const remaining = Math.max(0, 60 - s.elapsed);
-    const timerFlash = remaining < 10 && Math.floor(s.frameCount / 15) % 2 === 0;
-    ctx.fillStyle = remaining < 10 ? (timerFlash ? "#ff6666" : "#ff2222") : "#ffffff";
+    // Elapsed time
+    ctx.fillStyle = "#ffffff";
     ctx.font = "bold 22px monospace";
     ctx.textAlign = "center";
-    ctx.fillText(`${Math.ceil(remaining)}s`, CANVAS_W / 2, 36);
+    ctx.fillText(`${Math.floor(s.elapsed)}s`, CANVAS_W / 2, 36);
 
     // Speed indicator with bar
     const speedPct = Math.min(1, s.baseSpeed / 600);
@@ -1018,7 +1013,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     // Survival time
     ctx.fillStyle = "#88ccff";
     ctx.font = "12px monospace";
-    const surv = Math.min(60, Math.floor(s.elapsed * 10) / 10);
+    const surv = Math.floor(s.elapsed * 10) / 10;
     ctx.fillText(`Survived: ${surv}s  |  Top speed: ${Math.floor(s.topSpeed / 5)} km/h`, CANVAS_W / 2, CANVAS_H / 2 + 76);
 
     // Vignette (scanlines handled by CSS .scanlines class)
