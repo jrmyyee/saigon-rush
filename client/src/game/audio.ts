@@ -89,6 +89,34 @@ export class AudioManager {
     osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch {} };
   }
 
+  private playNoiseBurst(vol: number, duration: number, filterFreq?: number): void {
+    const ctx = this.ensureContext();
+    if (!ctx || !this.sfxGain) return;
+    const now = ctx.currentTime;
+    const bufSize = Math.floor(ctx.sampleRate * duration);
+    const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(Math.max(0.005, vol), now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    if (filterFreq) {
+      const filter = ctx.createBiquadFilter();
+      filter.type = filterFreq > 1000 ? "highpass" : "lowpass";
+      filter.frequency.value = filterFreq;
+      src.connect(filter);
+      filter.connect(g);
+    } else {
+      src.connect(g);
+    }
+    g.connect(this.sfxGain);
+    src.start(now);
+    src.stop(now + duration + 0.02);
+    src.onended = () => { try { src.disconnect(); g.disconnect(); } catch {} };
+  }
+
   playCrash(): void {
     const ctx = this.ensureContext();
     if (!ctx || !this.sfxGain) return;
@@ -136,57 +164,59 @@ export class AudioManager {
     setTimeout(() => this.playTone(800, 0.12, "square", 0.12), 130);
   }
 
-  // ── AI-Generated Obstacle Sound ───────────────────────
-  playObstacleSound(soundData: Array<{ wave: string; startHz: number; endHz: number; duration: number; volume: number; delay: number }>): void {
-    const ctx = this.ensureContext();
-    if (!ctx || !this.sfxGain) return;
-    const now = ctx.currentTime;
-    // Limit to max 4 notes to prevent audio overload
-    const notes = soundData.slice(0, 4);
-    for (const note of notes) {
-      const startHz = Math.max(50, Math.min(1500, note.startHz || 200));
-      const endHz = Math.max(50, Math.min(1500, note.endHz || startHz));
-      const duration = Math.max(0.05, Math.min(1.0, note.duration || 0.2));
-      const volume = Math.max(0.01, Math.min(0.2, note.volume || 0.1));
-      const delay = Math.max(0, Math.min(1.0, note.delay || 0));
-      const startTime = now + delay;
+  // ── Category-Mapped Obstacle Sounds ──────────────────
+  playCategorySound(category: string): void {
+    switch (category) {
+      case "animal":
+        // Low descending moo/growl
+        this.playTone(250, 0.3, "triangle", 0.15);
+        setTimeout(() => this.playTone(180, 0.25, "triangle", 0.12), 150);
+        break;
+      case "vehicle":
+        // Honk + engine
+        this.playTone(380, 0.2, "square", 0.12);
+        setTimeout(() => this.playTone(340, 0.15, "square", 0.1), 100);
+        break;
+      case "food":
+        // Bell/chime
+        this.playTone(523, 0.1, "triangle", 0.1);
+        setTimeout(() => this.playTone(659, 0.1, "triangle", 0.1), 80);
+        setTimeout(() => this.playTone(784, 0.08, "triangle", 0.08), 160);
+        break;
+      case "explosion":
+        this.playCrash(); // reuse crash sound
+        break;
+      case "music":
+        // Ascending festive arpeggio
+        this.playTone(262, 0.08, "square", 0.08);
+        setTimeout(() => this.playTone(330, 0.08, "square", 0.08), 60);
+        setTimeout(() => this.playTone(392, 0.08, "square", 0.08), 120);
+        setTimeout(() => this.playTone(523, 0.12, "square", 0.1), 180);
+        break;
+      case "human":
+        // Crowd murmur — layered noise
+        this.playTone(200, 0.2, "sawtooth", 0.06);
+        this.playTone(250, 0.2, "sawtooth", 0.05);
+        break;
+      case "machine":
+        // Electric buzz
+        this.playTone(120, 0.25, "sawtooth", 0.1);
+        setTimeout(() => this.playTone(180, 0.15, "square", 0.08), 100);
+        break;
+      default:
+        this.playTone(300, 0.15, "square", 0.1);
+    }
+  }
 
-      try {
-        if (note.wave === "noise") {
-          const bufSize = Math.floor(ctx.sampleRate * duration);
-          const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
-          const d = buf.getChannelData(0);
-          for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
-          const src = ctx.createBufferSource();
-          src.buffer = buf;
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(volume, startTime);
-          g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-          src.connect(g);
-          g.connect(this.sfxGain);
-          src.start(startTime);
-          src.stop(startTime + duration + 0.02);
-          src.onended = () => { try { src.disconnect(); g.disconnect(); } catch {} };
-        } else {
-          const waveType = (["sine", "square", "sawtooth", "triangle"].includes(note.wave) ? note.wave : "square") as OscillatorType;
-          const osc = ctx.createOscillator();
-          osc.type = waveType;
-          osc.frequency.setValueAtTime(startHz, startTime);
-          if (Math.abs(startHz - endHz) > 10) {
-            osc.frequency.exponentialRampToValueAtTime(Math.max(20, endHz), startTime + duration);
-          }
-          const g = ctx.createGain();
-          g.gain.setValueAtTime(volume, startTime);
-          g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-          osc.connect(g);
-          g.connect(this.sfxGain);
-          osc.start(startTime);
-          osc.stop(startTime + duration + 0.02);
-          osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch {} };
-        }
-      } catch {
-        // Silently ignore malformed sound notes
-      }
+  // ── ElevenLabs Announcement Audio ──────────────────────
+  playAnnouncementAudio(base64Audio: string): void {
+    if (!base64Audio) return;
+    try {
+      const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
+      audio.volume = 0.6;
+      audio.play().catch(() => {}); // Ignore autoplay errors
+    } catch {
+      // Silently ignore
     }
   }
 
@@ -255,6 +285,22 @@ export class AudioManager {
       const tid = setTimeout(() => {
         this.playTone(n.f, n.d, "triangle", 0.08);
       }, n.t * beatMs) as unknown as number;
+      this.musicTimeouts.push(tid);
+    }
+
+    // Percussion — kick drum on beats 0, 4, 8, 12; hi-hat on beats 2, 6, 10, 14
+    const kicks = [0, 4, 8, 12];
+    const hihats = [2, 6, 10, 14];
+    for (const beat of kicks) {
+      const tid = setTimeout(() => {
+        this.playNoiseBurst(0.06, 0.12, 80); // short low thump
+      }, beat * beatMs) as unknown as number;
+      this.musicTimeouts.push(tid);
+    }
+    for (const beat of hihats) {
+      const tid = setTimeout(() => {
+        this.playNoiseBurst(0.03, 0.06, 8000); // short high tick
+      }, beat * beatMs) as unknown as number;
       this.musicTimeouts.push(tid);
     }
 

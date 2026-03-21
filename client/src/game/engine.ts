@@ -24,6 +24,7 @@ import {
   drawRoad,
   isObstacleOffScreen,
   playerHit,
+  preloadObstacleImage,
   spawnObstacle,
   updateObstacle,
   updateParticle,
@@ -244,9 +245,9 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       if (w.timer <= 0) {
         // Warning expired — spawn the obstacle
         state.obstacles.push(spawnObstacle(w.obstacle));
-        // Play AI-generated obstacle sound
-        if (w.obstacle.soundData && w.obstacle.soundData.length > 0) {
-          audio.playObstacleSound(w.obstacle.soundData);
+        // Play category-mapped obstacle sound
+        if (w.obstacle.soundCategory) {
+          audio.playCategorySound(w.obstacle.soundCategory);
         }
       }
     }
@@ -702,6 +703,10 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
 
     addObstacle(obstacle: GameObstacle) {
       if (obstacle.fromAudience) {
+        // Preload fal.ai image during the 2-second warning phase
+        if (obstacle.imageUrl) {
+          preloadObstacleImage(obstacle.imageUrl);
+        }
         // Telegraph: 2-second warning before spawning
         state.pendingWarnings.push({
           obstacle,
@@ -711,6 +716,9 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
           sirenTimer: 0,
         });
         audio.playWarning();
+        if (obstacle.announcementAudio) {
+          audio.playAnnouncementAudio(obstacle.announcementAudio);
+        }
       } else {
         state.suggestionQueue.push(obstacle);
       }

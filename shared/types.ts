@@ -31,7 +31,9 @@ export interface GameObstacle {
   fromAudience: boolean;
   movement?: "straight" | "weave" | "drift";
   spriteData?: Array<{ x: number; y: number; w: number; h: number; c: string }>;
-  soundData?: Array<{ wave: "sine" | "square" | "sawtooth" | "triangle" | "noise"; startHz: number; endHz: number; duration: number; volume: number; delay: number }>;
+  soundCategory?: "animal" | "vehicle" | "food" | "explosion" | "music" | "human" | "machine";
+  imageUrl?: string;  // fal.ai generated sprite image URL
+  announcementAudio?: string;  // base64 encoded audio from ElevenLabs
 }
 
 export interface GameState {
@@ -99,23 +101,7 @@ export const OBSTACLE_JSON_SCHEMA = {
         },
         description: "Pixel art sprite as array of {x, y, w, h, c} rectangles. Design a recognizable side-view silhouette. Use 10-20 rects. Space is 50x40px. c = hex color.",
       },
-      soundData: {
-        type: "array" as const,
-        items: {
-          type: "object" as const,
-          properties: {
-            wave: { type: "string" as const, enum: ["sine", "square", "sawtooth", "triangle", "noise"] },
-            startHz: { type: "number" as const },
-            endHz: { type: "number" as const },
-            duration: { type: "number" as const },
-            volume: { type: "number" as const },
-            delay: { type: "number" as const },
-          },
-          required: ["wave", "startHz", "endHz", "duration", "volume", "delay"] as const,
-          additionalProperties: false,
-        },
-        description: "Sound design: array of oscillator notes to play when obstacle spawns. Each note has a waveform, frequency sweep (startHz to endHz), duration in seconds, volume (0-1), and delay before playing. Design 2-4 notes that sound like the obstacle. For 'noise' wave, Hz values are ignored.",
-      },
+      soundCategory: { type: "string" as const, enum: ["animal", "vehicle", "food", "explosion", "music", "human", "machine"] },
     },
     required: [
       "obstacleType",
@@ -129,7 +115,7 @@ export const OBSTACLE_JSON_SCHEMA = {
       "audienceMessage",
       "movement",
       "spriteData",
-      "soundData",
+      "soundCategory",
     ],
     additionalProperties: false,
   },
@@ -165,12 +151,5 @@ Rules:
   * Add darker rectangles on bottom/right for shadow
   * Make the shape recognizable — if it's an animal, show legs, head, body. If a vehicle, show wheels and body.
   * Every obstacle should look DIFFERENT. A water buffalo should NOT look like a taxi.
-- soundData: Design the sound this obstacle makes using 2-4 oscillator notes.
-  Each note: wave type, frequency sweep (startHz→endHz), duration, volume (0-0.5), delay before playing.
-  Examples:
-  * Water buffalo moo: [{wave:"triangle", startHz:300, endHz:150, duration:0.4, volume:0.3, delay:0}, {wave:"triangle", startHz:280, endHz:140, duration:0.3, volume:0.2, delay:0.2}]
-  * Car horn: [{wave:"square", startHz:350, endHz:350, duration:0.3, volume:0.25, delay:0}]
-  * Explosion: [{wave:"noise", startHz:0, endHz:0, duration:0.3, volume:0.4, delay:0}, {wave:"sawtooth", startHz:200, endHz:40, duration:0.5, volume:0.3, delay:0}]
-  * Musical/festive: [{wave:"triangle", startHz:523, endHz:523, duration:0.1, volume:0.2, delay:0}, {wave:"triangle", startHz:659, endHz:659, duration:0.1, volume:0.2, delay:0.1}, {wave:"triangle", startHz:784, endHz:784, duration:0.1, volume:0.2, delay:0.2}]
-  Be creative! Match the sound to the obstacle's personality.
+- soundCategory: What category of sound does this obstacle make? "animal" (living creatures), "vehicle" (cars/bikes/buses), "food" (food carts, cooking sounds), "explosion" (falling/heavy/explosive things), "music" (festive/karaoke/musical things), "human" (crowds/people), "machine" (tech/mechanical things)
 - Keep Vietnamese street culture flavor when possible (xe ôm, bánh mì vendors, cyclos, karaoke speakers, etc.)`;

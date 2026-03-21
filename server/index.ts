@@ -1,5 +1,6 @@
 // Saigon Rush — Bun WebSocket Server
 import OpenAI from "openai";
+import { fal } from "@fal-ai/client";
 import type { ServerWebSocket } from "bun";
 import type { ClientRole, GameObstacle, WSMessage } from "../shared/types";
 import { OBSTACLE_JSON_SCHEMA, OPENAI_SYSTEM_PROMPT } from "../shared/types";
@@ -8,6 +9,7 @@ const PORT = parseInt(process.env.PORT || "8080");
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
 const RATE_LIMIT_MS = 15_000;
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+fal.config({ credentials: process.env.FAL_KEY });
 
 interface SocketData { sessionId: string; role: ClientRole; id: string }
 interface Session {
@@ -52,8 +54,50 @@ function makeFallbackObstacle(): GameObstacle {
   };
 }
 
+async function generateAnnouncement(displayName: string): Promise<string | undefined> {
+  try {
+    const text = `Coi chừng! ${displayName} đang tới!`;
+    const response = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM/stream", {
+      method: "POST",
+      headers: {
+        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+    if (!response.ok) throw new Error(`ElevenLabs ${response.status}`);
+    const buffer = await response.arrayBuffer();
+    return Buffer.from(buffer).toString("base64");
+  } catch (err) {
+    console.error("[elevenlabs] Failed:", err);
+    return undefined;
+  }
+}
+
+async function generateSpriteImage(displayName: string, color: string): Promise<string | undefined> {
+  try {
+    const result = await fal.subscribe("fal-ai/flux/schnell", {
+      input: {
+        prompt: `pixel art game sprite, side view, ${displayName}, retro 16-bit style, clean pixel edges, vibrant saturated colors, solid white background, no shadow, centered in frame, game asset`,
+        image_size: { width: 256, height: 256 },
+        num_images: 1,
+        num_inference_steps: 4,
+      },
+    });
+    return (result as any)?.data?.images?.[0]?.url || (result as any)?.images?.[0]?.url;
+  } catch (err) {
+    console.error("[fal.ai] Failed:", err);
+    return undefined;
+  }
+}
+
 async function generateObstacle(suggestion: string): Promise<GameObstacle> {
   try {
+    // Fire OpenAI first to get obstacle data
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -65,9 +109,16 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
     const content = res.choices[0]?.message?.content;
     if (!content) throw new Error("Empty OpenAI response");
     const parsed = JSON.parse(content);
+
+    // Fire fal.ai and ElevenLabs in parallel (non-blocking)
+    const [imageUrl, announcementAudio] = await Promise.all([
+      generateSpriteImage(parsed.displayName, parsed.color).catch(() => undefined),
+      generateAnnouncement(parsed.displayName).catch(() => undefined),
+    ]);
+
     return {
       id: crypto.randomUUID().slice(0, 8),
-      type: parsed.obstacleType || parsed.type || "unknown",
+      type: parsed.obstacleType || "unknown",
       displayName: parsed.displayName,
       lane: parsed.lane,
       width: parsed.width,
@@ -79,7 +130,9 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
       fromAudience: true,
       movement: parsed.movement,
       spriteData: parsed.spriteData,
-      soundData: parsed.soundData,
+      soundCategory: parsed.soundCategory,
+      imageUrl,
+      announcementAudio,
     };
   } catch (err) {
     console.error("[openai] Failed:", err);
@@ -115,6 +168,8 @@ const server = Bun.serve<SocketData>({
       if (role === "display") {
         session.display = ws;
         ws.subscribe(`audience:${sessionId}`);
+        // Warm up fal.ai model
+        generateSpriteImage("test obstacle", "#ff0000").catch(() => {});
       } else if (role === "controller") {
         session.controller = ws;
       } else {

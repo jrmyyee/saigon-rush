@@ -4,6 +4,29 @@
 import type { GameObstacle } from "@shared/types";
 import { type SpriteDefinition, createDynamicSprite, drawSprite, getSpriteForType, MOTORBIKE_SPRITE } from "./sprites";
 
+// ── Obstacle Image Cache (fal.ai generated images) ────────
+const imageCache = new Map<string, HTMLImageElement>();
+const imageLoading = new Set<string>();
+
+export function preloadObstacleImage(url: string): void {
+  if (imageCache.has(url) || imageLoading.has(url)) return;
+  imageLoading.add(url);
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    imageCache.set(url, img);
+    imageLoading.delete(url);
+  };
+  img.onerror = () => {
+    imageLoading.delete(url);
+  };
+  img.src = url;
+}
+
+export function getObstacleImage(url: string): HTMLImageElement | null {
+  return imageCache.get(url) || null;
+}
+
 // ── Constants ──────────────────────────────────────────────
 export const CANVAS_W = 960;
 export const CANVAS_H = 640;
@@ -162,6 +185,32 @@ export function isObstacleOffScreen(o: ActiveObstacle): boolean {
 }
 
 export function drawObstacle(ctx: CanvasRenderingContext2D, o: ActiveObstacle): void {
+  // Try to render fal.ai generated image first
+  if (o.data.imageUrl) {
+    const img = getObstacleImage(o.data.imageUrl);
+    if (img) {
+      // Draw ground shadow
+      ctx.fillStyle = "#00000030";
+      ctx.fillRect(o.x + 4, o.y + o.pixelHeight / 2 - 4, o.pixelWidth - 8, 6);
+
+      // Draw the generated image, scaled to obstacle size
+      const imgAspect = img.width / img.height;
+      const drawW = o.pixelWidth;
+      const drawH = drawW / imgAspect;
+      ctx.drawImage(img, o.x, o.y - drawH / 2, drawW, drawH);
+
+      // Still draw the label above
+      if (o.data.label) {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(o.data.label, o.x + o.pixelWidth / 2, o.y - drawH / 2 - 8);
+        ctx.textAlign = "start";
+      }
+      return; // Skip fillRect sprite rendering
+    }
+  }
+  // Fallback: fillRect sprite rendering
   const knownTypes = ["slow_motorbike", "taxi", "pho_cart", "bus", "cyclo"];
   let sprite: SpriteDefinition;
   if (o.data.spriteData && o.data.spriteData.length > 0) {
