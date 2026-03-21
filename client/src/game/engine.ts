@@ -84,7 +84,7 @@ function createState(): InternalState {
     road: createRoadState(),
     baseSpeed: 300,
     elapsed: 0,
-    spawnTimer: 3, // 3-second grace period — no obstacles at start
+    spawnTimer: 5, // 5-second grace period — no obstacles during intro countdown
     dustTimer: 0,
     speedLineTimer: 0,
     frameCount: 0,
@@ -715,18 +715,18 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       // HUD (drawn after post-processing so it's crisp)
       drawHUD(ctx, state);
 
-      // Cinematic intro sequence (first 3 seconds)
-      if (state.elapsed < 3.5) {
+      // Cinematic intro sequence (first 5 seconds)
+      if (state.elapsed < 5.5) {
         const t = state.elapsed;
-        // Phase 1 (0-1s): Title slam
-        if (t < 1.2) {
-          const scale = t < 0.15 ? t / 0.15 : 1; // Slam in over 150ms
-          const alpha = t < 0.15 ? t / 0.15 : 1;
-          ctx.globalAlpha = alpha;
+        // Phase 1 (0-1.8s): Title slam + subtitle
+        if (t < 1.8) {
+          const scale = t < 0.2 ? t / 0.2 : 1; // Slam in over 200ms
+          const alpha = t < 0.2 ? t / 0.2 : (t > 1.4 ? 1 - (t - 1.4) / 0.4 : 1);
+          ctx.globalAlpha = Math.max(0, alpha);
           ctx.fillStyle = "#000000aa";
-          ctx.fillRect(CANVAS_W / 2 - 240, CANVAS_H / 2 - 50, 480, 90);
+          ctx.fillRect(CANVAS_W / 2 - 260, CANVAS_H / 2 - 55, 520, 100);
           ctx.fillStyle = "#00ff88";
-          ctx.font = `bold ${Math.floor(36 * scale)}px monospace`;
+          ctx.font = `bold ${Math.floor(40 * scale)}px monospace`;
           ctx.textAlign = "center";
           ctx.fillText("SAIGON RUSH", CANVAS_W / 2, CANVAS_H / 2 - 10);
           ctx.fillStyle = "#ffcc00";
@@ -735,31 +735,31 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
           ctx.textAlign = "left";
           ctx.globalAlpha = 1;
         }
-        // Phase 2 (1.2-2.5s): "3... 2... 1..." countdown
-        else if (t < 2.7) {
-          const countT = t - 1.2;
-          const num = countT < 0.5 ? "3" : countT < 1.0 ? "2" : "1";
-          const beatT = countT % 0.5; // time within each beat
-          const beatScale = 1 + (1 - beatT / 0.3) * 0.4; // Punch in, settle
-          const alpha = beatT < 0.4 ? 1 : 1 - (beatT - 0.4) / 0.1;
+        // Phase 2 (2.0-4.4s): "3... 2... 1..." countdown — 0.8s per number
+        else if (t < 4.5) {
+          const countT = t - 2.0;
+          const num = countT < 0.8 ? "3" : countT < 1.6 ? "2" : "1";
+          const beatT = countT % 0.8; // time within each beat
+          const beatScale = beatT < 0.15 ? 1 + (1 - beatT / 0.15) * 0.5 : 1; // Punch in
+          const alpha = beatT < 0.6 ? 1 : 1 - (beatT - 0.6) / 0.2;
           ctx.globalAlpha = Math.max(0, alpha);
           ctx.fillStyle = "#ffcc00";
-          ctx.font = `bold ${Math.floor(64 * Math.min(beatScale, 1.4))}px monospace`;
+          ctx.font = `bold ${Math.floor(72 * Math.min(beatScale, 1.5))}px monospace`;
           ctx.textAlign = "center";
-          ctx.fillText(num, CANVAS_W / 2, CANVAS_H / 2 + 20);
+          ctx.fillText(num, CANVAS_W / 2, CANVAS_H / 2 + 24);
           ctx.textAlign = "left";
           ctx.globalAlpha = 1;
         }
-        // Phase 3 (2.7-3.5s): "GO!" flash
+        // Phase 3 (4.5-5.5s): "GO!" flash + expand
         else {
-          const goT = t - 2.7;
-          const alpha = 1 - goT / 0.8;
-          const scale = 1 + goT * 0.5;
+          const goT = t - 4.5;
+          const alpha = 1 - goT / 1.0;
+          const scale = 1 + goT * 0.6;
           ctx.globalAlpha = Math.max(0, alpha);
           ctx.fillStyle = "#00ff88";
-          ctx.font = `bold ${Math.floor(72 * scale)}px monospace`;
+          ctx.font = `bold ${Math.floor(80 * scale)}px monospace`;
           ctx.textAlign = "center";
-          ctx.fillText("GO!", CANVAS_W / 2, CANVAS_H / 2 + 20);
+          ctx.fillText("GO!", CANVAS_W / 2, CANVAS_H / 2 + 24);
           ctx.textAlign = "left";
           ctx.globalAlpha = 1;
         }
@@ -1052,8 +1052,12 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       state.elapsed = 0;
       audio.init();
       audio.playEngine();
-      setTimeout(() => audio.startMusic(), 50);
-      setTimeout(() => audio.playHorn(), 100);
+      // Countdown beeps synced with intro visuals (title 0-1.8s, countdown 2.0-4.4s)
+      setTimeout(() => audio.playCountdownBeep(3), 2000);
+      setTimeout(() => audio.playCountdownBeep(2), 2800);
+      setTimeout(() => audio.playCountdownBeep(1), 3600);
+      setTimeout(() => { audio.playCountdownBeep(0); audio.startMusic(); }, 4500);
+      setTimeout(() => audio.playHorn(), 4600);
     },
 
     handleInput(action: InputAction) {

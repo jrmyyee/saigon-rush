@@ -284,6 +284,18 @@ export class AudioManager {
     }
   }
 
+  /** Countdown beep — ascending pitch for 3, 2, 1, then a big "GO" tone */
+  playCountdownBeep(num: number): void {
+    if (num === 3) this.playTone(440, 0.15, "square", 0.12);
+    else if (num === 2) this.playTone(554, 0.15, "square", 0.12);
+    else if (num === 1) this.playTone(659, 0.15, "square", 0.12);
+    else {
+      // "GO" — big chord
+      this.playTone(880, 0.3, "square", 0.12);
+      this.playTone(1100, 0.3, "triangle", 0.08);
+    }
+  }
+
   playWarning(): void {
     this.playTone(600, 0.12, "square", 0.12);
     setTimeout(() => this.playTone(800, 0.12, "square", 0.12), 130);
