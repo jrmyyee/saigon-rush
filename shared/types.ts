@@ -30,6 +30,8 @@ export interface GameObstacle {
   audienceMessage: string; // fun message shown to audience feed
   fromAudience: boolean;
   movement?: "straight" | "weave" | "drift";
+  spriteData?: Array<{ x: number; y: number; w: number; h: number; c: string }>;
+  soundData?: Array<{ wave: "sine" | "square" | "sawtooth" | "triangle" | "noise"; startHz: number; endHz: number; duration: number; volume: number; delay: number }>;
 }
 
 export interface GameState {
@@ -81,6 +83,39 @@ export const OBSTACLE_JSON_SCHEMA = {
       label: { type: "string" as const },
       audienceMessage: { type: "string" as const },
       movement: { type: "string" as const, enum: ["straight", "weave", "drift"] },
+      spriteData: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            x: { type: "number" as const },
+            y: { type: "number" as const },
+            w: { type: "number" as const },
+            h: { type: "number" as const },
+            c: { type: "string" as const },
+          },
+          required: ["x", "y", "w", "h", "c"] as const,
+          additionalProperties: false,
+        },
+        description: "Pixel art sprite as array of {x, y, w, h, c} rectangles. Design a recognizable side-view silhouette. Use 10-20 rects. Space is 50x40px. c = hex color.",
+      },
+      soundData: {
+        type: "array" as const,
+        items: {
+          type: "object" as const,
+          properties: {
+            wave: { type: "string" as const, enum: ["sine", "square", "sawtooth", "triangle", "noise"] },
+            startHz: { type: "number" as const },
+            endHz: { type: "number" as const },
+            duration: { type: "number" as const },
+            volume: { type: "number" as const },
+            delay: { type: "number" as const },
+          },
+          required: ["wave", "startHz", "endHz", "duration", "volume", "delay"] as const,
+          additionalProperties: false,
+        },
+        description: "Sound design: array of oscillator notes to play when obstacle spawns. Each note has a waveform, frequency sweep (startHz to endHz), duration in seconds, volume (0-1), and delay before playing. Design 2-4 notes that sound like the obstacle. For 'noise' wave, Hz values are ignored.",
+      },
     },
     required: [
       "obstacleType",
@@ -93,6 +128,8 @@ export const OBSTACLE_JSON_SCHEMA = {
       "label",
       "audienceMessage",
       "movement",
+      "spriteData",
+      "soundData",
     ],
     additionalProperties: false,
   },
@@ -117,4 +154,23 @@ Rules:
 - dangerLevel: 1 = funny nuisance, 2 = real threat, 3 = absolute chaos
 - lane: 0 (top), 1 (middle), 2 (bottom) — vary it
 - movement: "straight" (normal), "weave" (swerves between lanes — use for drunk drivers, erratic vehicles), "drift" (slowly changes lanes — use for large slow things like stampedes or parades)
+- spriteData: Design a pixel art sprite for the obstacle as an array of [x, y, width, height, color] rectangles.
+  Think of it like building the obstacle's side-view silhouette from colored blocks.
+  Rules for sprite design:
+  * Use 10-20 rectangles (more = more detail)
+  * Coordinate space is 50 wide x 40 tall
+  * Origin (0,0) is top-left
+  * Use the main color plus 2-3 shading variants for depth
+  * Add small highlight rectangles (lighter color) on top surfaces
+  * Add darker rectangles on bottom/right for shadow
+  * Make the shape recognizable — if it's an animal, show legs, head, body. If a vehicle, show wheels and body.
+  * Every obstacle should look DIFFERENT. A water buffalo should NOT look like a taxi.
+- soundData: Design the sound this obstacle makes using 2-4 oscillator notes.
+  Each note: wave type, frequency sweep (startHz→endHz), duration, volume (0-0.5), delay before playing.
+  Examples:
+  * Water buffalo moo: [{wave:"triangle", startHz:300, endHz:150, duration:0.4, volume:0.3, delay:0}, {wave:"triangle", startHz:280, endHz:140, duration:0.3, volume:0.2, delay:0.2}]
+  * Car horn: [{wave:"square", startHz:350, endHz:350, duration:0.3, volume:0.25, delay:0}]
+  * Explosion: [{wave:"noise", startHz:0, endHz:0, duration:0.3, volume:0.4, delay:0}, {wave:"sawtooth", startHz:200, endHz:40, duration:0.5, volume:0.3, delay:0}]
+  * Musical/festive: [{wave:"triangle", startHz:523, endHz:523, duration:0.1, volume:0.2, delay:0}, {wave:"triangle", startHz:659, endHz:659, duration:0.1, volume:0.2, delay:0.1}, {wave:"triangle", startHz:784, endHz:784, duration:0.1, volume:0.2, delay:0.2}]
+  Be creative! Match the sound to the obstacle's personality.
 - Keep Vietnamese street culture flavor when possible (xe ôm, bánh mì vendors, cyclos, karaoke speakers, etc.)`;

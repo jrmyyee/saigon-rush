@@ -171,6 +171,53 @@ export class AudioManager {
     osc2.stop(now + 0.13);
   }
 
+  playObstacleSound(soundData: Array<{ wave: string; startHz: number; endHz: number; duration: number; volume: number; delay: number }>): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+    for (const note of soundData) {
+      // Clamp values for safety
+      const startHz = Math.max(40, Math.min(2000, note.startHz));
+      const endHz = Math.max(40, Math.min(2000, note.endHz));
+      const duration = Math.max(0.01, Math.min(2, note.duration));
+      const volume = Math.max(0, Math.min(0.5, note.volume));
+      const delay = Math.max(0, Math.min(2, note.delay));
+      const startTime = now + delay;
+
+      if (note.wave === "noise") {
+        // Generate noise buffer
+        const bufferSize = Math.floor(ctx.sampleRate * duration);
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buffer;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(volume, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+        noise.connect(gain);
+        gain.connect(this.masterGain!);
+        noise.start(startTime);
+        noise.stop(startTime + duration);
+      } else {
+        const osc = ctx.createOscillator();
+        osc.type = note.wave as OscillatorType;
+        osc.frequency.setValueAtTime(startHz, startTime);
+        if (Math.abs(startHz - endHz) > 1) {
+          osc.frequency.exponentialRampToValueAtTime(endHz, startTime + duration);
+        }
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(volume, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+        osc.connect(gain);
+        gain.connect(this.masterGain!);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+      }
+    }
+  }
+
   playWarning(): void {
     const ctx = this.ensureContext();
     const now = ctx.currentTime;

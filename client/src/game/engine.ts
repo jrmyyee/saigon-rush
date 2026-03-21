@@ -244,6 +244,10 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       if (w.timer <= 0) {
         // Warning expired — spawn the obstacle
         state.obstacles.push(spawnObstacle(w.obstacle));
+        // Play AI-generated obstacle sound
+        if (w.obstacle.soundData && w.obstacle.soundData.length > 0) {
+          audio.playObstacleSound(w.obstacle.soundData);
+        }
       }
     }
     state.pendingWarnings = state.pendingWarnings.filter((w) => w.timer > 0);

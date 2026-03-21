@@ -77,6 +77,9 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
       label: parsed.label,
       audienceMessage: parsed.audienceMessage,
       fromAudience: true,
+      movement: parsed.movement,
+      spriteData: parsed.spriteData,
+      soundData: parsed.soundData,
     };
   } catch (err) {
     console.error("[openai] Failed:", err);
