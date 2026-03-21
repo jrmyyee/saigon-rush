@@ -61,6 +61,7 @@ interface InternalState {
   shakeIntensity: number;
   hitFlashTimer: number;
   suggestionQueue: GameObstacle[];
+  pendingWarnings: Array<{ obstacle: GameObstacle; timer: number; lane: number; tickerX: number; sirenTimer: number }>;
   obstaclesDodged: number;
   nearMisses: number;
   audienceChaos: number;
@@ -85,6 +86,7 @@ function createState(): InternalState {
     shakeIntensity: 0,
     hitFlashTimer: 0,
     suggestionQueue: [],
+    pendingWarnings: [],
     obstaclesDodged: 0,
     nearMisses: 0,
     audienceChaos: 0,
@@ -218,6 +220,23 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     if (state.shakeTimer > 0) state.shakeTimer -= dt;
     if (state.hitFlashTimer > 0) state.hitFlashTimer -= dt;
 
+    // Update pending warnings (obstacle telegraph system)
+    for (const w of state.pendingWarnings) {
+      w.timer -= dt;
+      w.tickerX -= 200 * dt; // Scroll ticker text left
+      w.sirenTimer += dt;
+      // Replay siren every 0.6 seconds during warning phase
+      if (w.sirenTimer >= 0.6) {
+        w.sirenTimer = 0;
+        audio.playWarning();
+      }
+      if (w.timer <= 0) {
+        // Warning expired — spawn the obstacle
+        state.obstacles.push(spawnObstacle(w.obstacle));
+      }
+    }
+    state.pendingWarnings = state.pendingWarnings.filter((w) => w.timer > 0);
+
     // Timer game over (60-second rounds)
     if (state.elapsed >= 60) {
       endGame();
@@ -293,6 +312,35 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       drawRoad(ctx, state.road);
       // Obstacles
       for (const o of state.obstacles) drawObstacle(ctx, o);
+      // Warning zones for pending audience obstacles
+      for (const w of state.pendingWarnings) {
+        const laneY = LANE_Y[w.lane];
+        const pulseAlpha = 0.15 + 0.15 * Math.sin(state.elapsed * 10);
+        // Flashing red zone on the right edge of the target lane
+        ctx.fillStyle = `rgba(255, 0, 0, ${pulseAlpha})`;
+        ctx.fillRect(CANVAS_W - 160, laneY - 40, 160, 80);
+        // Red border
+        ctx.strokeStyle = `rgba(255, 50, 50, ${pulseAlpha + 0.2})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(CANVAS_W - 160, laneY - 40, 160, 80);
+        // "!" warning icon
+        ctx.fillStyle = `rgba(255, 255, 0, ${pulseAlpha + 0.3})`;
+        ctx.font = "bold 28px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("!", CANVAS_W - 80, laneY + 10);
+        ctx.textAlign = "left";
+      }
+      // News ticker for pending warnings
+      if (state.pendingWarnings.length > 0) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, 50, CANVAS_W, 24);
+        ctx.fillStyle = "#ff4444";
+        ctx.font = "bold 14px monospace";
+        for (const w of state.pendingWarnings) {
+          const text = `INCOMING: ${w.obstacle.label}`;
+          ctx.fillText(text, w.tickerX, 66);
+        }
+      }
       // Player
       drawPlayer(ctx, state.player, state.frameCount);
       // Particles
@@ -441,7 +489,19 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
     },
 
     addObstacle(obstacle: GameObstacle) {
-      state.suggestionQueue.push(obstacle);
+      if (obstacle.fromAudience) {
+        // Telegraph: 2-second warning before spawning
+        state.pendingWarnings.push({
+          obstacle,
+          timer: 2.0,
+          lane: obstacle.lane,
+          tickerX: CANVAS_W,
+          sirenTimer: 0,
+        });
+        audio.playWarning();
+      } else {
+        state.suggestionQueue.push(obstacle);
+      }
     },
 
     getState(): GameState {

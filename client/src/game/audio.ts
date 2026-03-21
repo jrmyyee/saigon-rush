@@ -165,6 +165,34 @@ export class AudioManager {
     osc2.stop(now + 0.13);
   }
 
+  playWarning(): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+    // Tone 1: 600Hz square wave
+    const osc1 = ctx.createOscillator();
+    osc1.type = "square";
+    osc1.frequency.value = 600;
+    const g1 = ctx.createGain();
+    g1.gain.setValueAtTime(0.18, now);
+    g1.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    osc1.connect(g1);
+    g1.connect(this.masterGain!);
+    osc1.start(now);
+    osc1.stop(now + 0.15);
+    // Tone 2: 800Hz square wave
+    const osc2 = ctx.createOscillator();
+    osc2.type = "square";
+    osc2.frequency.value = 800;
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0001, now);
+    g2.gain.setValueAtTime(0.18, now + 0.15);
+    g2.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+    osc2.connect(g2);
+    g2.connect(this.masterGain!);
+    osc2.start(now + 0.15);
+    osc2.stop(now + 0.3);
+  }
+
   destroy(): void {
     this.stopEngine();
     if (this.ctx) {

@@ -64,7 +64,20 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
     });
     const content = res.choices[0]?.message?.content;
     if (!content) throw new Error("Empty OpenAI response");
-    return { id: crypto.randomUUID().slice(0, 8), ...JSON.parse(content), fromAudience: true };
+    const parsed = JSON.parse(content);
+    return {
+      id: crypto.randomUUID().slice(0, 8),
+      type: parsed.obstacleType || parsed.type || "unknown",
+      displayName: parsed.displayName,
+      lane: parsed.lane,
+      width: parsed.width,
+      speed: Math.max(0.5, Math.min(2.0, parsed.speed)),
+      color: parsed.color,
+      dangerLevel: parsed.dangerLevel,
+      label: parsed.label,
+      audienceMessage: parsed.audienceMessage,
+      fromAudience: true,
+    };
   } catch (err) {
     console.error("[openai] Failed:", err);
     return makeFallbackObstacle();

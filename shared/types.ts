@@ -29,6 +29,7 @@ export interface GameObstacle {
   label: string; // emoji + name shown in game (e.g. "🐃 Water Buffalo")
   audienceMessage: string; // fun message shown to audience feed
   fromAudience: boolean;
+  movement?: "straight" | "weave" | "drift";
 }
 
 export interface GameState {
@@ -70,7 +71,7 @@ export const OBSTACLE_JSON_SCHEMA = {
   schema: {
     type: "object" as const,
     properties: {
-      type: { type: "string" as const },
+      obstacleType: { type: "string" as const, description: "A short snake_case identifier for the obstacle, e.g. water_buffalo, pho_cart, wedding_procession" },
       displayName: { type: "string" as const },
       lane: { type: "number" as const, enum: [0, 1, 2] },
       width: { type: "string" as const, enum: ["small", "medium", "large"] },
@@ -79,9 +80,10 @@ export const OBSTACLE_JSON_SCHEMA = {
       dangerLevel: { type: "number" as const, enum: [1, 2, 3] },
       label: { type: "string" as const },
       audienceMessage: { type: "string" as const },
+      movement: { type: "string" as const, enum: ["straight", "weave", "drift"] },
     },
     required: [
-      "type",
+      "obstacleType",
       "displayName",
       "lane",
       "width",
@@ -90,22 +92,29 @@ export const OBSTACLE_JSON_SCHEMA = {
       "dangerLevel",
       "label",
       "audienceMessage",
+      "movement",
     ],
     additionalProperties: false,
   },
 } as const;
 
-export const OPENAI_SYSTEM_PROMPT = `You are an obstacle designer for "Saigon Rush", a motorbike runner game set in Ho Chi Minh City traffic.
-Players in the audience suggest obstacles using natural language. Convert each suggestion into a game obstacle.
+export const OPENAI_SYSTEM_PROMPT = `You are a WILDLY CREATIVE obstacle designer for "Saigon Rush", a chaotic motorbike runner game set in Ho Chi Minh City traffic.
+
+Audience members suggest obstacles. Your job: take their suggestion and make it 10x MORE ridiculous, funny, and memorable. Don't just name the thing — give it personality, absurd scale, and comedic flair.
+
+Examples of GOOD creative output:
+- Input: "a cat" → obstacleType: "mega_street_cat", label: "🐱 MEGA STREET CAT", audienceMessage: "A 3-meter-tall street cat sits in the road grooming itself, completely unbothered by traffic"
+- Input: "fish man with a pho bowl" → obstacleType: "pho_fisherman", label: "🐟 PHỞ FISHERMAN", audienceMessage: "A man riding a giant fish while balancing a steaming bowl of phở on his head, broth sloshing everywhere"
+- Input: "banana" → obstacleType: "banana_avalanche", label: "🍌 BANANA AVALANCHE", audienceMessage: "Someone dropped a crate of bananas and now the entire lane is a slip hazard"
 
 Rules:
-- Obstacles must be physically dodge-able (not instant-kill walls)
-- Be creative and funny with displayName and audienceMessage
-- If the suggestion is inappropriate or nonsensical, create a fun obstacle loosely inspired by it
-- speed should be between 0.5 (very slow, easy to dodge) and 2.0 (fast, hard to dodge)
-- color should be a hex color that visually represents the obstacle
-- label should be an emoji + short name (e.g. "🐃 Water Buffalo", "🍜 Phở Cart")
-- audienceMessage should be entertaining (e.g. "A massive water buffalo wanders onto the road!")
-- lane should be 0 (top), 1 (middle), or 2 (bottom) - pick randomly or based on the suggestion
-- dangerLevel: 1 = minor nuisance, 2 = moderate danger, 3 = very dangerous
-- Keep it fun and Vietnamese-themed when possible`;
+- displayName should be FUNNY and CAPITALIZED — make it a character or event, not just a noun
+- label should be emoji + the memorable short name
+- audienceMessage should be a vivid, hilarious 1-2 sentence description that makes the audience laugh
+- PRESERVE the original suggestion's spirit but amplify it to absurd levels
+- speed: 0.5 (slow, lumbering) to 2.0 (zooming through) — match the obstacle's personality
+- color: vivid hex color that stands out on a dark road
+- dangerLevel: 1 = funny nuisance, 2 = real threat, 3 = absolute chaos
+- lane: 0 (top), 1 (middle), 2 (bottom) — vary it
+- movement: "straight" (normal), "weave" (swerves between lanes — use for drunk drivers, erratic vehicles), "drift" (slowly changes lanes — use for large slow things like stampedes or parades)
+- Keep Vietnamese street culture flavor when possible (xe ôm, bánh mì vendors, cyclos, karaoke speakers, etc.)`;

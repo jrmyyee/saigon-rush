@@ -76,23 +76,71 @@ export interface ActiveObstacle {
   pixelHeight: number;
   passed: boolean; // True once player has passed it (for dodge scoring)
   nearMissTriggered: boolean;
+  movement: "straight" | "weave" | "drift";
+  sinePhase: number;
+  startY: number;
+  driftTargetY: number;
+  driftElapsed: number;
 }
 
 export function spawnObstacle(data: GameObstacle): ActiveObstacle {
   const pw = WIDTH_MAP[data.width];
+  const y = LANE_Y[data.lane];
+
+  // Determine movement type
+  let movement: "straight" | "weave" | "drift";
+  if (data.movement) {
+    // Explicit movement from AI schema
+    movement = data.movement;
+  } else if (data.fromAudience) {
+    // Audience obstacles: based on dangerLevel
+    if (data.dangerLevel === 3) movement = "weave";
+    else if (data.dangerLevel === 2) movement = Math.random() < 0.3 ? "drift" : "straight";
+    else movement = "straight";
+  } else {
+    // Random-spawned obstacles
+    const roll = Math.random();
+    if (roll < 0.2) movement = "weave";
+    else if (roll < 0.3) movement = "drift";
+    else movement = "straight";
+  }
+
+  // Pick a random adjacent lane for drift target
+  let driftTargetY = y;
+  if (movement === "drift") {
+    const adjacentLanes = data.lane === 0 ? [1] : data.lane === 2 ? [1] : [0, 2];
+    const targetLane = adjacentLanes[Math.floor(Math.random() * adjacentLanes.length)];
+    driftTargetY = LANE_Y[targetLane];
+  }
+
   return {
     data,
     x: CANVAS_W + 50,
-    y: LANE_Y[data.lane],
+    y,
     pixelWidth: pw,
     pixelHeight: pw * 0.6 + 10,
     passed: false,
     nearMissTriggered: false,
+    movement,
+    sinePhase: 0,
+    startY: y,
+    driftTargetY,
+    driftElapsed: 0,
   };
 }
 
 export function updateObstacle(o: ActiveObstacle, baseSpeed: number, dt: number): void {
   o.x -= baseSpeed * o.data.speed * dt;
+
+  if (o.movement === "weave") {
+    o.sinePhase += dt * 3;
+    o.y = o.startY + Math.sin(o.sinePhase) * 50;
+  } else if (o.movement === "drift") {
+    // Lerp from startY to driftTargetY over ~3 seconds
+    o.driftElapsed += dt;
+    const t = Math.min(1, o.driftElapsed / 3);
+    o.y = o.startY + (o.driftTargetY - o.startY) * t;
+  }
 }
 
 export function isObstacleOffScreen(o: ActiveObstacle): boolean {
