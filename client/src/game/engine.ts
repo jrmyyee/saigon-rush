@@ -101,6 +101,7 @@ export interface GameAPI {
   start(): void;
   handleInput(action: InputAction): void;
   addObstacle(obstacle: GameObstacle): void;
+  updateObstacleImage(obstacleId: string, imageUrl: string): void;
   getState(): GameState;
   destroy(): void;
 }
@@ -725,6 +726,19 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
         }
       } else {
         state.suggestionQueue.push(obstacle);
+      }
+    },
+
+    updateObstacleImage(obstacleId: string, imageUrl: string) {
+      // Update an already-spawned obstacle with a DALL-E image that arrived late
+      preloadObstacleImage(imageUrl);
+      // Check active obstacles
+      for (const o of state.obstacles) {
+        if (o.data.id === obstacleId) { o.data.imageUrl = imageUrl; return; }
+      }
+      // Check pending warnings
+      for (const w of state.pendingWarnings) {
+        if (w.obstacle.id === obstacleId) { w.obstacle.imageUrl = imageUrl; return; }
       }
     },
 

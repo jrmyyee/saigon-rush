@@ -36,7 +36,7 @@ export function GameScreen() {
 
   useEffect(() => {
     const ws = createWSClient("display", sessionId);
-    ws.onMessage((msg: WSMessage) => {
+    ws.onMessage((msg: any) => {
       if (msg.type === "player_joined" && msg.role === "controller") setPhase("playing");
       if (msg.type === "input" && gameRef.current) {
         gameRef.current.handleInput(msg.action);
@@ -46,6 +46,18 @@ export function GameScreen() {
       }
       if (msg.type === "suggestion_accepted") {
         setFeed((f) => [{ text: msg.original, result: msg.result.label, timestamp: Date.now() }, ...f].slice(0, 5));
+      }
+      // DALL-E image arrived (async, after obstacle already spawned)
+      if (msg.type === "obstacle_image_ready" && gameRef.current) {
+        gameRef.current.updateObstacleImage(msg.obstacleId, msg.imageUrl);
+      }
+      // ElevenLabs SFX arrived
+      if (msg.type === "obstacle_sfx_ready" && gameRef.current) {
+        try {
+          const audio = new Audio(`data:audio/mpeg;base64,${msg.soundEffectAudio}`);
+          audio.volume = 0.5;
+          audio.play().catch(() => {});
+        } catch {}
       }
     });
     return () => ws.close();

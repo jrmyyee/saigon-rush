@@ -116,7 +116,6 @@ async function generateSoundEffect(displayName: string, audienceMessage: string)
 
 async function generateObstacle(suggestion: string): Promise<GameObstacle> {
   try {
-    // Fire OpenAI first to get obstacle data
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -129,13 +128,7 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
     if (!content) throw new Error("Empty OpenAI response");
     const parsed = JSON.parse(content);
 
-    // Fire DALL-E, ElevenLabs TTS, and ElevenLabs SFX in parallel (non-blocking)
-    const [imageUrl, announcementAudio, soundEffectAudio] = await Promise.all([
-      generateSpriteImage(parsed.displayName).catch(() => undefined),
-      generateAnnouncement(parsed.displayName).catch(() => undefined),
-      generateSoundEffect(parsed.displayName, parsed.audienceMessage || "").catch(() => undefined),
-    ]);
-
+    // Return immediately — DALL-E and ElevenLabs SFX fire in background (see message handler)
     return {
       id: crypto.randomUUID().slice(0, 8),
       type: parsed.obstacleType || "unknown",
@@ -151,9 +144,6 @@ async function generateObstacle(suggestion: string): Promise<GameObstacle> {
       movement: parsed.movement,
       spriteData: parsed.spriteData,
       soundCategory: parsed.soundCategory,
-      imageUrl,
-      announcementAudio,
-      soundEffectAudio,
     };
   } catch (err) {
     console.error("[openai] Failed:", err);
@@ -226,9 +216,23 @@ const server = Bun.serve<SocketData>({
         }
         rateLimits.set(id, now);
 
+        // PHASE 1: Get obstacle data from OpenAI (~1s) and send immediately
         const obstacle = await generateObstacle(msg.text);
         pub(`game:${sessionId}`, { type: "new_obstacle", obstacle });
         pub(`audience:${sessionId}`, { type: "suggestion_accepted", original: msg.text, result: obstacle });
+
+        // PHASE 2: Fire DALL-E + ElevenLabs SFX in background, send updates when ready
+        const obstacleId = obstacle.id;
+        generateSpriteImage(obstacle.displayName).then((imageUrl) => {
+          if (imageUrl) {
+            pub(`game:${sessionId}`, { type: "obstacle_image_ready" as any, obstacleId, imageUrl });
+          }
+        }).catch(() => {});
+        generateSoundEffect(obstacle.displayName, obstacle.audienceMessage || "").then((soundEffectAudio) => {
+          if (soundEffectAudio) {
+            pub(`game:${sessionId}`, { type: "obstacle_sfx_ready" as any, obstacleId, soundEffectAudio });
+          }
+        }).catch(() => {});
         return;
       }
 
