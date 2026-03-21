@@ -706,13 +706,14 @@ export class AudioManager {
     const ctx = this.ensureContext();
     if (!ctx) return;
 
-    const bpm = 90; // Half the game speed — chill, atmospheric
+    // Same energy as the game — gets you pumped before you even start
+    const bpm = 170;
     const beatMs = (60 / bpm) * 1000;
+    const totalBeats = 64;
 
-    // Vietnamese Nam mode — same scale, dreamy and slow
     const C4 = 261.63, D4 = 293.66, F4 = 349.23, G4 = 392.00, Bb4 = 466.16;
-    const C5 = 523.25;
-    const C3 = 130.81, F3 = 174.61, G3 = 196.00, Bb3 = 233.08;
+    const C5 = 523.25, D5 = 587.33, F5 = 698.46;
+    const C3 = 130.81, D3 = 146.83, F3 = 174.61, G3 = 196.00, Bb3 = 233.08;
 
     const sched = (beat: number, fn: () => void) => {
       const tid = setTimeout(() => { if (this.lobbyPlaying) fn(); }, beat * beatMs) as unknown as number;
@@ -722,36 +723,76 @@ export class AudioManager {
       sched(beat, () => this.playVibratoTone(freq, dur, vol));
     const bass = (beat: number, freq: number, dur: number, vol: number) =>
       sched(beat, () => this.playTone(freq, dur, "triangle", vol));
+    const kick = (beat: number) => sched(beat, () => this.playNoiseBurst(0.06, 0.10, 60));
+    const hihat = (beat: number) => sched(beat, () => this.playNoiseBurst(0.02, 0.04, 8000));
+    const snare = (beat: number) => sched(beat, () => this.playNoiseBurst(0.04, 0.07, 3000));
 
-    // Sparse, dreamy melody — lots of space
-    lead(0, G4, 0.4, 0.05);
-    lead(2, Bb4, 0.5, 0.06);
-    lead(4, C5, 0.6, 0.06);
-    lead(6, Bb4, 0.4, 0.05);
-    lead(8, G4, 0.5, 0.06);
-    lead(10, F4, 0.6, 0.05);
-    lead(12, D4, 0.4, 0.05);
-    lead(14, F4, 0.5, 0.06);
-    lead(16, G4, 0.6, 0.06);
-    lead(18, Bb4, 0.4, 0.05);
-    lead(20, G4, 0.5, 0.05);
-    lead(22, F4, 0.4, 0.05);
-    lead(24, C4, 0.8, 0.06);
-    lead(28, D4, 0.5, 0.05);
-    lead(30, F4, 0.6, 0.06);
+    // ── Melody: bouncy staccato, same vibe as game music ──
+    lead(0, G4, 0.08, 0.06); lead(0.5, G4, 0.06, 0.04);
+    lead(1, Bb4, 0.08, 0.06); lead(2, C5, 0.08, 0.07);
+    lead(3, Bb4, 0.06, 0.05); lead(3.5, G4, 0.06, 0.05);
+    lead(4, F4, 0.08, 0.06); lead(5, G4, 0.08, 0.06);
+    lead(6, C5, 0.10, 0.07); lead(7, Bb4, 0.06, 0.05);
+    lead(8, G4, 0.06, 0.06); lead(8.5, Bb4, 0.06, 0.06);
+    lead(9, C5, 0.06, 0.07); lead(9.5, D5, 0.06, 0.07);
+    lead(10, F5, 0.10, 0.08);
+    lead(11, D5, 0.06, 0.06); lead(11.5, C5, 0.06, 0.06);
+    lead(12, Bb4, 0.08, 0.06); lead(13, G4, 0.08, 0.06);
+    lead(14, F4, 0.06, 0.05); lead(14.5, G4, 0.06, 0.05);
+    lead(15, Bb4, 0.08, 0.06);
+    // Response phrase
+    lead(16, D4, 0.08, 0.06); lead(17, F4, 0.08, 0.06);
+    lead(18, G4, 0.08, 0.07); lead(19, F4, 0.06, 0.05);
+    lead(20, C4, 0.08, 0.06); lead(21, D4, 0.08, 0.06);
+    lead(22, G4, 0.10, 0.07); lead(23, F4, 0.06, 0.05);
+    lead(24, F4, 0.06, 0.06); lead(24.5, G4, 0.06, 0.06);
+    lead(25, Bb4, 0.06, 0.07); lead(25.5, C5, 0.06, 0.07);
+    lead(26, D5, 0.10, 0.07);
+    lead(28, G4, 0.08, 0.06); lead(30, Bb4, 0.08, 0.06);
+    // Bars 9-16: repeat with escalation
+    lead(32, G4, 0.06, 0.07); lead(32.5, Bb4, 0.06, 0.07);
+    lead(33, C5, 0.06, 0.07); lead(33.5, D5, 0.06, 0.07);
+    lead(34, C5, 0.06, 0.06); lead(34.5, Bb4, 0.06, 0.06);
+    lead(35, G4, 0.06, 0.06); lead(35.5, Bb4, 0.06, 0.06);
+    lead(36, C5, 0.06, 0.07); lead(36.5, D5, 0.06, 0.07);
+    lead(37, F5, 0.10, 0.08); lead(37.5, D5, 0.06, 0.06);
+    lead(38, C5, 0.06, 0.06); lead(39, Bb4, 0.06, 0.06);
+    lead(40, G4, 0.06, 0.07); lead(40.5, Bb4, 0.06, 0.07);
+    lead(41, C5, 0.06, 0.07); lead(41.5, D5, 0.06, 0.07);
+    lead(42, F5, 0.08, 0.08); lead(43, D5, 0.06, 0.06);
+    lead(44, C5, 0.06, 0.06); lead(45, Bb4, 0.06, 0.06);
+    lead(46, G4, 0.06, 0.06); lead(47, F4, 0.06, 0.06);
+    // Peak bars 13-16
+    lead(48, C5, 0.06, 0.08); lead(48.5, D5, 0.06, 0.08);
+    lead(49, F5, 0.10, 0.09);
+    lead(50, D5, 0.06, 0.07); lead(50.5, C5, 0.06, 0.07);
+    lead(51, Bb4, 0.06, 0.06); lead(51.5, G4, 0.06, 0.06);
+    lead(52, Bb4, 0.06, 0.07); lead(52.5, C5, 0.06, 0.07);
+    lead(53, D5, 0.06, 0.08); lead(53.5, F5, 0.06, 0.08);
+    lead(54, D5, 0.10, 0.09);
+    lead(56, C5, 0.06, 0.08); lead(57, F5, 0.08, 0.09);
+    lead(58, D5, 0.06, 0.07); lead(59, C5, 0.06, 0.07);
+    lead(60, Bb4, 0.06, 0.06); lead(61, G4, 0.06, 0.06);
+    lead(62, F4, 0.08, 0.06); lead(63, G4, 0.08, 0.06);
 
-    // Slow bass — one note every 4 beats
-    bass(0, C3, 0.8, 0.06);
-    bass(4, G3, 0.8, 0.06);
-    bass(8, F3, 0.8, 0.06);
-    bass(12, Bb3, 0.8, 0.05);
-    bass(16, C3, 0.8, 0.06);
-    bass(20, G3, 0.8, 0.06);
-    bass(24, F3, 0.8, 0.06);
-    bass(28, C3, 0.8, 0.05);
+    // ── Bass ──
+    const bassLine: Array<[number, number]> = [
+      [0, C3], [4, F3], [8, C3], [12, G3],
+      [16, D3], [20, F3], [24, G3], [28, Bb3],
+      [32, C3], [36, G3], [40, C3], [44, F3],
+      [48, C3], [52, G3], [56, F3], [60, C3],
+    ];
+    for (const [beat, freq] of bassLine) bass(beat, freq, 0.28, 0.07);
 
-    // Loop after 32 beats
-    const loopTid = setTimeout(() => this.playLobbyLoop(), 32 * beatMs) as unknown as number;
+    // ── Drums ──
+    for (let b = 0; b < totalBeats; b += 0.5) hihat(b);
+    const kickPattern = [0, 1.5, 3, 4, 5.5, 7, 8, 9.5, 11, 12, 13.5, 15];
+    for (let section = 0; section < 4; section++) {
+      for (const offset of kickPattern) kick(section * 16 + offset);
+    }
+    for (let b = 2; b < totalBeats; b += 4) snare(b);
+
+    const loopTid = setTimeout(() => this.playLobbyLoop(), totalBeats * beatMs) as unknown as number;
     this.lobbyTimeouts.push(loopTid);
   }
 
@@ -769,19 +810,19 @@ export class AudioManager {
       this.masterGain.gain.linearRampToValueAtTime(0.12, this.ctx.currentTime + 1.5);
     }
 
-    // Play descending game-over melody — slow, sad, Vietnamese-flavored
-    const Bb4 = 466.16, G4 = 392.00, F4 = 349.23, D4 = 293.66, C4 = 261.63;
-    const C3 = 130.81;
+    // Slow, mournful Vietnamese melody — the dreamy version
+    const C4 = 261.63, D4 = 293.66, F4 = 349.23, G4 = 392.00, Bb4 = 466.16;
+    const C3 = 130.81, F3 = 174.61;
 
-    // Descending lament
-    setTimeout(() => this.playVibratoTone(Bb4, 0.5, 0.07), 200);
-    setTimeout(() => this.playVibratoTone(G4, 0.5, 0.07), 600);
-    setTimeout(() => this.playVibratoTone(F4, 0.6, 0.06), 1000);
-    setTimeout(() => this.playVibratoTone(D4, 0.8, 0.06), 1500);
-    setTimeout(() => {
-      this.playVibratoTone(C4, 1.2, 0.07);
-      this.playTone(C3, 1.5, "triangle", 0.06); // Deep bass resolution
-    }, 2200);
+    // Descending lament — slow and spacious
+    setTimeout(() => this.playVibratoTone(Bb4, 0.8, 0.06), 300);
+    setTimeout(() => this.playTone(Bb3, 1.0, "triangle", 0.05), 300);
+    setTimeout(() => this.playVibratoTone(G4, 0.8, 0.06), 900);
+    setTimeout(() => this.playVibratoTone(F4, 1.0, 0.06), 1600);
+    setTimeout(() => this.playTone(F3, 1.2, "triangle", 0.05), 1600);
+    setTimeout(() => this.playVibratoTone(D4, 1.0, 0.05), 2400);
+    setTimeout(() => this.playVibratoTone(C4, 1.5, 0.06), 3200);
+    setTimeout(() => this.playTone(C3, 2.0, "triangle", 0.05), 3200); // Deep bass resolution
 
     // Restore volume after melody for the results screen transition
     setTimeout(() => {
