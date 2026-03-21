@@ -965,60 +965,95 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   }
 
   function drawGameOverOverlay(ctx: CanvasRenderingContext2D, s: InternalState): void {
-    // Dark overlay
-    ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+    // Static/glitch bands (CRT death effect)
+    ctx.fillStyle = "rgba(0, 0, 0, 0.80)";
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    // Glitch scanline bands
+    for (let i = 0; i < 6; i++) {
+      const y = (s.frameCount * 3 + i * 107) % CANVAS_H;
+      ctx.fillStyle = `rgba(255, 0, 0, ${0.03 + Math.random() * 0.04})`;
+      ctx.fillRect(0, y, CANVAS_W, 2 + Math.random() * 8);
+    }
+    // Red vignette pulse
+    const pulse = Math.sin(s.frameCount * 0.08) * 0.08 + 0.12;
+    ctx.fillStyle = `rgba(255, 0, 0, ${pulse})`;
+    ctx.fillRect(0, 0, CANVAS_W, 40);
+    ctx.fillRect(0, CANVAS_H - 40, CANVAS_W, 40);
 
-    // Panel background
-    ctx.fillStyle = "#0a0a1a";
-    ctx.fillRect(CANVAS_W / 2 - 240, CANVAS_H / 2 - 90, 480, 200);
-    // Panel border
-    const borderColor = s.player.hp <= 0 ? "#ff444466" : "#00ff8866";
-    ctx.fillStyle = borderColor;
-    ctx.fillRect(CANVAS_W / 2 - 242, CANVAS_H / 2 - 92, 484, 2);
-    ctx.fillRect(CANVAS_W / 2 - 242, CANVAS_H / 2 + 108, 484, 2);
-    ctx.fillRect(CANVAS_W / 2 - 242, CANVAS_H / 2 - 92, 2, 202);
-    ctx.fillRect(CANVAS_W / 2 + 240, CANVAS_H / 2 - 92, 2, 202);
+    // Panel
+    ctx.fillStyle = "#060610";
+    ctx.fillRect(CANVAS_W / 2 - 280, CANVAS_H / 2 - 120, 560, 260);
+    // Red border glow
+    ctx.fillStyle = "#ff2222";
+    ctx.fillRect(CANVAS_W / 2 - 282, CANVAS_H / 2 - 122, 564, 2);
+    ctx.fillRect(CANVAS_W / 2 - 282, CANVAS_H / 2 + 138, 564, 2);
+    ctx.fillRect(CANVAS_W / 2 - 282, CANVAS_H / 2 - 122, 2, 262);
+    ctx.fillRect(CANVAS_W / 2 + 280, CANVAS_H / 2 - 122, 2, 262);
+    // Inner border
+    ctx.fillStyle = "#ff222244";
+    ctx.fillRect(CANVAS_W / 2 - 276, CANVAS_H / 2 - 116, 552, 1);
+    ctx.fillRect(CANVAS_W / 2 - 276, CANVAS_H / 2 + 133, 552, 1);
 
-    // Title
-    ctx.font = "bold 48px monospace";
+    // "WIPEOUT!" with glow
+    ctx.fillStyle = "#ff111122";
+    ctx.fillRect(CANVAS_W / 2 - 200, CANVAS_H / 2 - 108, 400, 52);
+    ctx.fillStyle = "#ff4444";
+    ctx.font = "bold 56px monospace";
     ctx.textAlign = "center";
-    if (s.player.hp <= 0) {
-      // Glow behind text
-      ctx.fillStyle = "#ff222218";
-      ctx.fillRect(CANVAS_W / 2 - 160, CANVAS_H / 2 - 70, 320, 40);
-      ctx.fillStyle = "#ff4444";
-      ctx.fillText("WIPEOUT!", CANVAS_W / 2, CANVAS_H / 2 - 38);
-    } else {
-      ctx.fillStyle = "#00ff8818";
-      ctx.fillRect(CANVAS_W / 2 - 160, CANVAS_H / 2 - 70, 320, 40);
-      ctx.fillStyle = "#00ff88";
-      ctx.fillText("TIME'S UP!", CANVAS_W / 2, CANVAS_H / 2 - 38);
+    ctx.fillText("WIPEOUT!", CANVAS_W / 2, CANVAS_H / 2 - 66);
+
+    // Score — large and golden
+    ctx.fillStyle = "#ffcc0022";
+    ctx.fillRect(CANVAS_W / 2 - 120, CANVAS_H / 2 - 44, 240, 40);
+    ctx.fillStyle = "#ffcc00";
+    ctx.font = "bold 36px monospace";
+    ctx.fillText(`${s.player.score}`, CANVAS_W / 2, CANVAS_H / 2 - 12);
+    ctx.fillStyle = "#ffcc0088";
+    ctx.font = "10px monospace";
+    ctx.fillText("SCORE", CANVAS_W / 2, CANVAS_H / 2 - 46);
+
+    // Stats row
+    const stats = [
+      { label: "DODGED", value: `${s.obstaclesDodged}`, color: "#00ff88" },
+      { label: "NEAR MISS", value: `${s.nearMisses}`, color: "#44ddff" },
+      { label: "HITS", value: `${s.totalHits}`, color: "#ff6644" },
+    ];
+    const statW = 140;
+    const statStartX = CANVAS_W / 2 - (stats.length * statW) / 2;
+    for (let i = 0; i < stats.length; i++) {
+      const sx = statStartX + i * statW + statW / 2;
+      ctx.fillStyle = stats[i].color + "11";
+      ctx.fillRect(sx - 55, CANVAS_H / 2 + 10, 110, 36);
+      ctx.fillStyle = stats[i].color;
+      ctx.font = "bold 22px monospace";
+      ctx.fillText(stats[i].value, sx, CANVAS_H / 2 + 34);
+      ctx.fillStyle = stats[i].color + "88";
+      ctx.font = "8px monospace";
+      ctx.fillText(stats[i].label, sx, CANVAS_H / 2 + 14);
     }
 
-    // Score
-    ctx.fillStyle = "#ffcc00";
-    ctx.font = "bold 30px monospace";
-    ctx.fillText(`Score: ${s.player.score}`, CANVAS_W / 2, CANVAS_H / 2 + 16);
-
-    // Stats line
-    ctx.fillStyle = "#aaaaaa";
-    ctx.font = "14px monospace";
-    ctx.fillText(
-      `Dodged: ${s.obstaclesDodged}  |  Near-misses: ${s.nearMisses}  |  Hits: ${s.totalHits}`,
-      CANVAS_W / 2,
-      CANVAS_H / 2 + 52,
-    );
-
-    // Survival time
-    ctx.fillStyle = "#88ccff";
-    ctx.font = "12px monospace";
+    // Survival + speed
     const surv = Math.floor(s.elapsed * 10) / 10;
-    ctx.fillText(`Survived: ${surv}s  |  Top speed: ${Math.floor(s.topSpeed / 5)} km/h`, CANVAS_W / 2, CANVAS_H / 2 + 76);
+    ctx.fillStyle = "#ffffff66";
+    ctx.font = "12px monospace";
+    ctx.fillText(`Survived ${surv}s  \u2022  Top speed ${Math.floor(s.topSpeed / 5)} km/h`, CANVAS_W / 2, CANVAS_H / 2 + 72);
 
-    // Vignette (scanlines handled by CSS .scanlines class)
+    // Rating
+    const rating = s.player.score > 3000 ? "TRAFFIC LEGEND"
+      : s.player.score > 1500 ? "SAIGON LOCAL"
+      : s.player.score > 600 ? "XE OM DRIVER" : "TOURIST";
+    ctx.fillStyle = "#ffcc00";
+    ctx.font = "bold 14px monospace";
+    ctx.fillText(`\u2605 ${rating} \u2605`, CANVAS_W / 2, CANVAS_H / 2 + 100);
+
+    // "Press any key" blink
+    if (Math.floor(s.frameCount / 30) % 2 === 0) {
+      ctx.fillStyle = "#ffffff55";
+      ctx.font = "11px monospace";
+      ctx.fillText("PRESS ANY KEY FOR TRAFFIC REPORT", CANVAS_W / 2, CANVAS_H / 2 + 126);
+    }
+
     drawVignette(ctx);
-
     ctx.textAlign = "left";
   }
 
