@@ -279,6 +279,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
   function endGame(): void {
     state.phase = "game_over";
     audio.stopEngine();
+    audio.stopMusic();
     const stats = buildStats();
     options?.onGameOver?.(stats);
   }
@@ -676,6 +677,7 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       state.elapsed = 0;
       audio.init();
       audio.playEngine();
+      audio.startMusic();
       audio.playHorn();
     },
 

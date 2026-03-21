@@ -97,20 +97,26 @@ export function GameScreen() {
 
   return (
     <div className="w-full h-full flex bg-saigon-dark">
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center relative">
         <canvas ref={canvasRef} width={960} height={640} className="max-w-full max-h-full" style={{ imageRendering: "pixelated" }} />
-      </div>
-      {feed.length > 0 && (
-        <div className="w-56 bg-saigon-sky/80 p-3 flex flex-col gap-2 overflow-hidden">
-          <h2 className="font-pixel text-neon-yellow text-[10px]">CHAOS FEED</h2>
-          {feed.map((item, i) => (
-            <div key={i} className="bg-saigon-dark/60 rounded px-2 py-1">
-              <p className="text-white/50 text-xs truncate">{item.text}</p>
-              <p className="text-neon-green text-sm">{item.result}</p>
-            </div>
-          ))}
+        <div className="absolute bottom-2 left-2 bg-saigon-dark/80 px-2 py-1 rounded">
+          <p className="text-white/40 text-[9px] font-pixel">AUDIENCE: {audienceUrl.replace(window.location.origin, '...')}</p>
         </div>
-      )}
+      </div>
+      <div className="w-56 bg-saigon-sky/80 p-3 flex flex-col gap-2 overflow-hidden">
+        <h2 className="font-pixel text-neon-yellow text-[10px]">CHAOS FEED</h2>
+        <div className="mb-2">
+          <QRCodeSVG value={audienceUrl} size={80} bgColor="#1a1a2e" fgColor="#ffdd00" />
+          <p className="text-white/40 text-[8px] mt-1">Scan to send chaos</p>
+        </div>
+        {feed.length === 0 && <p className="text-white/30 text-[9px] mt-2">Waiting for suggestions...</p>}
+        {feed.map((item, i) => (
+          <div key={i} className="bg-saigon-dark/60 rounded px-2 py-1">
+            <p className="text-white/50 text-xs truncate">{item.text}</p>
+            <p className="text-neon-green text-sm">{item.result}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

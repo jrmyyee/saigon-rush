@@ -7,35 +7,38 @@ export class AudioManager {
   private engineOsc: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
   private engineRunning = false;
+  private musicPlaying = false;
+  private musicTimeouts: number[] = [];
 
   init(): void {
     if (this.ctx) {
-      // Resume if suspended (browser autoplay policy)
       if (this.ctx.state === "suspended") this.ctx.resume();
       return;
     }
     this.ctx = new AudioContext();
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.4;
+    this.masterGain.gain.value = 0.35;
     this.masterGain.connect(this.ctx.destination);
-    // Resume immediately in case it starts suspended
     if (this.ctx.state === "suspended") this.ctx.resume();
   }
 
-  private ensureContext(): AudioContext {
+  private ensureContext(): AudioContext | null {
     if (!this.ctx) this.init();
-    if (this.ctx!.state === "suspended") this.ctx!.resume();
-    return this.ctx!;
+    if (!this.ctx) return null;
+    if (this.ctx.state === "suspended") this.ctx.resume();
+    return this.ctx;
   }
 
+  // ── Engine Sound ──────────────────────────────────────
   playEngine(): void {
     if (this.engineRunning) return;
     const ctx = this.ensureContext();
+    if (!ctx) return;
     this.engineOsc = ctx.createOscillator();
     this.engineOsc.type = "sawtooth";
     this.engineOsc.frequency.value = 85;
     this.engineGain = ctx.createGain();
-    this.engineGain.gain.value = 0.12;
+    this.engineGain.gain.value = 0.08;
     this.engineOsc.connect(this.engineGain);
     this.engineGain.connect(this.masterGain!);
     this.engineOsc.start();
@@ -44,7 +47,7 @@ export class AudioManager {
 
   stopEngine(): void {
     if (!this.engineRunning || !this.engineOsc) return;
-    this.engineOsc.stop();
+    try { this.engineOsc.stop(); } catch { /* already stopped */ }
     this.engineOsc.disconnect();
     this.engineOsc = null;
     this.engineGain?.disconnect();
@@ -54,200 +57,216 @@ export class AudioManager {
 
   setEngineSpeed(speed: number): void {
     if (!this.engineOsc) return;
-    // Map speed (200-800 range) to frequency (80-140Hz)
     const freq = 80 + (speed / 800) * 60;
     this.engineOsc.frequency.value = freq;
     if (this.engineGain) {
-      this.engineGain.gain.value = 0.08 + (speed / 800) * 0.1;
+      this.engineGain.gain.value = Math.min(0.15, 0.06 + (speed / 800) * 0.09);
     }
+  }
+
+  // ── SFX ───────────────────────────────────────────────
+  private playTone(freq: number, duration: number, type: OscillatorType = "square", vol: number = 0.15): void {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(Math.max(0.001, vol), now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(gain);
+    gain.connect(this.masterGain!);
+    osc.start(now);
+    osc.stop(now + duration + 0.01);
   }
 
   playCrash(): void {
     const ctx = this.ensureContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
-    // Noise burst via buffer
-    const bufferSize = ctx.sampleRate * 0.15;
+    // Noise burst
+    const bufferSize = Math.floor(ctx.sampleRate * 0.15);
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
-    }
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
     const noise = ctx.createBufferSource();
     noise.buffer = buffer;
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.4, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-    noise.connect(noiseGain);
-    noiseGain.connect(this.masterGain!);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.3, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    noise.connect(ng);
+    ng.connect(this.masterGain!);
     noise.start(now);
-    noise.stop(now + 0.15);
-    // Descending square wave
+    noise.stop(now + 0.16);
+    // Descending thud
     const osc = ctx.createOscillator();
     osc.type = "square";
     osc.frequency.setValueAtTime(300, now);
     osc.frequency.exponentialRampToValueAtTime(60, now + 0.2);
-    const oscGain = ctx.createGain();
-    oscGain.gain.setValueAtTime(0.2, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-    osc.connect(oscGain);
-    oscGain.connect(this.masterGain!);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.15, now);
+    og.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc.connect(og);
+    og.connect(this.masterGain!);
     osc.start(now);
-    osc.stop(now + 0.2);
+    osc.stop(now + 0.21);
   }
 
   playDodge(): void {
-    const ctx = this.ensureContext();
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(400, now);
-    osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
-    osc.connect(gain);
-    gain.connect(this.masterGain!);
-    osc.start(now);
-    osc.stop(now + 0.12);
+    this.playTone(400, 0.12, "triangle", 0.12);
+    setTimeout(() => this.playTone(800, 0.08, "triangle", 0.08), 30);
   }
 
-  playHorn(): void {
-    const ctx = this.ensureContext();
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = "square";
-    osc.frequency.value = 350;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.setValueAtTime(0.15, now + 0.18);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
-    osc.connect(gain);
-    gain.connect(this.masterGain!);
-    osc.start(now);
-    osc.stop(now + 0.22);
-  }
-
+  playHorn(): void { this.playTone(350, 0.2, "square", 0.12); }
   playBoost(): void {
     const ctx = this.ensureContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     osc.type = "sawtooth";
     osc.frequency.setValueAtTime(150, now);
-    osc.frequency.exponentialRampToValueAtTime(600, now + 0.3);
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.12, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-    osc.connect(gain);
-    gain.connect(this.masterGain!);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.25);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.1, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    osc.connect(g);
+    g.connect(this.masterGain!);
     osc.start(now);
-    osc.stop(now + 0.35);
+    osc.stop(now + 0.31);
   }
 
-  playPickup(): void {
-    const ctx = this.ensureContext();
-    const now = ctx.currentTime;
-    // C5 blip
-    const osc1 = ctx.createOscillator();
-    osc1.type = "triangle";
-    osc1.frequency.value = 523;
-    const g1 = ctx.createGain();
-    g1.gain.setValueAtTime(0.15, now);
-    g1.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
-    osc1.connect(g1);
-    g1.connect(this.masterGain!);
-    osc1.start(now);
-    osc1.stop(now + 0.06);
-    // E5 blip
-    const osc2 = ctx.createOscillator();
-    osc2.type = "triangle";
-    osc2.frequency.value = 659;
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, now);
-    g2.gain.setValueAtTime(0.15, now + 0.07);
-    g2.gain.exponentialRampToValueAtTime(0.01, now + 0.13);
-    osc2.connect(g2);
-    g2.connect(this.masterGain!);
-    osc2.start(now + 0.07);
-    osc2.stop(now + 0.13);
+  playWarning(): void {
+    this.playTone(600, 0.12, "square", 0.12);
+    setTimeout(() => this.playTone(800, 0.12, "square", 0.12), 130);
   }
 
+  // ── AI-Generated Obstacle Sound ───────────────────────
   playObstacleSound(soundData: Array<{ wave: string; startHz: number; endHz: number; duration: number; volume: number; delay: number }>): void {
     const ctx = this.ensureContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
     for (const note of soundData) {
-      // Clamp values for safety
-      const startHz = Math.max(40, Math.min(2000, note.startHz));
-      const endHz = Math.max(40, Math.min(2000, note.endHz));
-      const duration = Math.max(0.01, Math.min(2, note.duration));
-      const volume = Math.max(0, Math.min(0.5, note.volume));
-      const delay = Math.max(0, Math.min(2, note.delay));
+      const startHz = Math.max(40, Math.min(2000, note.startHz || 200));
+      const endHz = Math.max(40, Math.min(2000, note.endHz || 200));
+      const duration = Math.max(0.02, Math.min(1.5, note.duration || 0.2));
+      const volume = Math.max(0.01, Math.min(0.35, note.volume || 0.15));
+      const delay = Math.max(0, Math.min(1.5, note.delay || 0));
       const startTime = now + delay;
 
-      if (note.wave === "noise") {
-        // Generate noise buffer
-        const bufferSize = Math.floor(ctx.sampleRate * duration);
-        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+      try {
+        if (note.wave === "noise") {
+          const bufSize = Math.floor(ctx.sampleRate * duration);
+          const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+          const d = buf.getChannelData(0);
+          for (let i = 0; i < bufSize; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(volume, startTime);
+          g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+          src.connect(g);
+          g.connect(this.masterGain!);
+          src.start(startTime);
+          src.stop(startTime + duration + 0.01);
+        } else {
+          const waveType = (["sine", "square", "sawtooth", "triangle"].includes(note.wave) ? note.wave : "square") as OscillatorType;
+          const osc = ctx.createOscillator();
+          osc.type = waveType;
+          osc.frequency.setValueAtTime(startHz, startTime);
+          if (Math.abs(startHz - endHz) > 5) {
+            osc.frequency.exponentialRampToValueAtTime(endHz, startTime + duration);
+          }
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(volume, startTime);
+          g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+          osc.connect(g);
+          g.connect(this.masterGain!);
+          osc.start(startTime);
+          osc.stop(startTime + duration + 0.01);
         }
-        const noise = ctx.createBufferSource();
-        noise.buffer = buffer;
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(volume, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-        noise.connect(gain);
-        gain.connect(this.masterGain!);
-        noise.start(startTime);
-        noise.stop(startTime + duration);
-      } else {
-        const osc = ctx.createOscillator();
-        osc.type = note.wave as OscillatorType;
-        osc.frequency.setValueAtTime(startHz, startTime);
-        if (Math.abs(startHz - endHz) > 1) {
-          osc.frequency.exponentialRampToValueAtTime(endHz, startTime + duration);
-        }
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(volume, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-        osc.connect(gain);
-        gain.connect(this.masterGain!);
-        osc.start(startTime);
-        osc.stop(startTime + duration);
+      } catch {
+        // Silently ignore malformed sound notes
       }
     }
   }
 
-  playWarning(): void {
+  // ── Background Music (Chiptune Loop) ──────────────────
+  startMusic(): void {
+    if (this.musicPlaying) return;
+    this.musicPlaying = true;
+    this.playMusicLoop();
+  }
+
+  stopMusic(): void {
+    this.musicPlaying = false;
+    for (const t of this.musicTimeouts) clearTimeout(t);
+    this.musicTimeouts = [];
+  }
+
+  private playMusicLoop(): void {
+    if (!this.musicPlaying) return;
     const ctx = this.ensureContext();
-    const now = ctx.currentTime;
-    // Tone 1: 600Hz square wave
-    const osc1 = ctx.createOscillator();
-    osc1.type = "square";
-    osc1.frequency.value = 600;
-    const g1 = ctx.createGain();
-    g1.gain.setValueAtTime(0.18, now);
-    g1.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-    osc1.connect(g1);
-    g1.connect(this.masterGain!);
-    osc1.start(now);
-    osc1.stop(now + 0.15);
-    // Tone 2: 800Hz square wave
-    const osc2 = ctx.createOscillator();
-    osc2.type = "square";
-    osc2.frequency.value = 800;
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, now);
-    g2.gain.setValueAtTime(0.18, now + 0.15);
-    g2.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-    osc2.connect(g2);
-    g2.connect(this.masterGain!);
-    osc2.start(now + 0.15);
-    osc2.stop(now + 0.3);
+    if (!ctx) return;
+
+    // Simple 8-bar chiptune melody in C minor — Vietnamese-influenced pentatonic
+    const bpm = 140;
+    const beatMs = (60 / bpm) * 1000;
+    const notes = [
+      // bar 1-2: ascending phrase
+      { f: 262, d: 0.12, t: 0 },      // C4
+      { f: 311, d: 0.12, t: 1 },      // Eb4
+      { f: 392, d: 0.12, t: 2 },      // G4
+      { f: 466, d: 0.2, t: 3 },       // Bb4
+      { f: 523, d: 0.12, t: 4 },      // C5
+      { f: 466, d: 0.12, t: 5 },      // Bb4
+      { f: 392, d: 0.2, t: 6 },       // G4
+      { f: 349, d: 0.12, t: 7 },      // F4
+      // bar 3-4: descending phrase
+      { f: 392, d: 0.12, t: 8 },      // G4
+      { f: 523, d: 0.15, t: 9 },      // C5
+      { f: 466, d: 0.12, t: 10 },     // Bb4
+      { f: 392, d: 0.12, t: 11 },     // G4
+      { f: 311, d: 0.2, t: 12 },      // Eb4
+      { f: 262, d: 0.15, t: 13 },     // C4
+      { f: 311, d: 0.12, t: 14 },     // Eb4
+      { f: 349, d: 0.2, t: 15 },      // F4
+    ];
+
+    // Bass line (lower octave, triangle wave)
+    const bass = [
+      { f: 131, d: 0.3, t: 0 },     // C3
+      { f: 131, d: 0.15, t: 2 },
+      { f: 156, d: 0.3, t: 4 },     // Eb3
+      { f: 156, d: 0.15, t: 6 },
+      { f: 175, d: 0.3, t: 8 },     // F3
+      { f: 175, d: 0.15, t: 10 },
+      { f: 196, d: 0.3, t: 12 },    // G3
+      { f: 156, d: 0.3, t: 14 },    // Eb3
+    ];
+
+    for (const n of notes) {
+      const tid = setTimeout(() => {
+        this.playTone(n.f, n.d, "square", 0.06);
+      }, n.t * beatMs) as unknown as number;
+      this.musicTimeouts.push(tid);
+    }
+
+    for (const n of bass) {
+      const tid = setTimeout(() => {
+        this.playTone(n.f, n.d, "triangle", 0.08);
+      }, n.t * beatMs) as unknown as number;
+      this.musicTimeouts.push(tid);
+    }
+
+    // Loop after 16 beats
+    const loopTid = setTimeout(() => this.playMusicLoop(), 16 * beatMs) as unknown as number;
+    this.musicTimeouts.push(loopTid);
   }
 
   destroy(): void {
     this.stopEngine();
+    this.stopMusic();
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;
