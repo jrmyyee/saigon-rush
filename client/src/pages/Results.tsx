@@ -181,7 +181,7 @@ export function Results() {
                 RIDE AGAIN
               </button>
               <p style={{ fontSize: "0.5rem", color: "#ffffff22", fontFamily: "monospace", letterSpacing: "0.1em" }}>
-                POWERED BY AI — BUILT AT LOTUSHACKS 2026
+                LOTUSHACKS 2026
               </p>
             </div>
           </div>
