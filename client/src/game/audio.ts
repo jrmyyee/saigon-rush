@@ -4,11 +4,13 @@
 export class AudioManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private sfxGain: GainNode | null = null; // Separate gain for SFX to prevent engine interference
   private engineOsc: OscillatorNode | null = null;
   private engineGain: GainNode | null = null;
   private engineRunning = false;
   private musicPlaying = false;
   private musicTimeouts: number[] = [];
+  private activeNodes: Array<AudioNode> = []; // Track for cleanup
 
   init(): void {
     if (this.ctx) {
@@ -19,6 +21,10 @@ export class AudioManager {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.35;
     this.masterGain.connect(this.ctx.destination);
+    // Separate SFX bus so effects don't interfere with engine
+    this.sfxGain = this.ctx.createGain();
+    this.sfxGain.gain.value = 0.7;
+    this.sfxGain.connect(this.masterGain);
     if (this.ctx.state === "suspended") this.ctx.resume();
   }
 
@@ -67,50 +73,54 @@ export class AudioManager {
   // ── SFX ───────────────────────────────────────────────
   private playTone(freq: number, duration: number, type: OscillatorType = "square", vol: number = 0.15): void {
     const ctx = this.ensureContext();
-    if (!ctx) return;
+    if (!ctx || !this.sfxGain) return;
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     osc.type = type;
     osc.frequency.value = freq;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(Math.max(0.001, vol), now);
+    gain.gain.setValueAtTime(Math.max(0.005, vol), now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
     osc.connect(gain);
-    gain.connect(this.masterGain!);
+    gain.connect(this.sfxGain);
     osc.start(now);
-    osc.stop(now + duration + 0.01);
+    osc.stop(now + duration + 0.02);
+    // Auto-cleanup
+    osc.onended = () => { try { osc.disconnect(); gain.disconnect(); } catch {} };
   }
 
   playCrash(): void {
     const ctx = this.ensureContext();
-    if (!ctx) return;
+    if (!ctx || !this.sfxGain) return;
     const now = ctx.currentTime;
     // Noise burst
-    const bufferSize = Math.floor(ctx.sampleRate * 0.15);
+    const bufferSize = Math.floor(ctx.sampleRate * 0.12);
     const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
     const noise = ctx.createBufferSource();
     noise.buffer = buffer;
     const ng = ctx.createGain();
-    ng.gain.setValueAtTime(0.3, now);
-    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    ng.gain.setValueAtTime(0.25, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
     noise.connect(ng);
-    ng.connect(this.masterGain!);
+    ng.connect(this.sfxGain);
     noise.start(now);
-    noise.stop(now + 0.16);
+    noise.stop(now + 0.13);
+    noise.onended = () => { try { noise.disconnect(); ng.disconnect(); } catch {} };
     // Descending thud
     const osc = ctx.createOscillator();
     osc.type = "square";
-    osc.frequency.setValueAtTime(300, now);
-    osc.frequency.exponentialRampToValueAtTime(60, now + 0.2);
+    osc.frequency.setValueAtTime(250, now);
+    osc.frequency.exponentialRampToValueAtTime(60, now + 0.15);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.15, now);
-    og.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    og.gain.setValueAtTime(0.12, now);
+    og.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
     osc.connect(og);
-    og.connect(this.masterGain!);
+    og.connect(this.sfxGain);
     osc.start(now);
-    osc.stop(now + 0.21);
+    osc.stop(now + 0.16);
+    osc.onended = () => { try { osc.disconnect(); og.disconnect(); } catch {} };
   }
 
   playDodge(): void {
@@ -119,22 +129,7 @@ export class AudioManager {
   }
 
   playHorn(): void { this.playTone(350, 0.2, "square", 0.12); }
-  playBoost(): void {
-    const ctx = this.ensureContext();
-    if (!ctx) return;
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(150, now);
-    osc.frequency.exponentialRampToValueAtTime(600, now + 0.25);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.1, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-    osc.connect(g);
-    g.connect(this.masterGain!);
-    osc.start(now);
-    osc.stop(now + 0.31);
-  }
+  playBoost(): void { this.playTone(200, 0.25, "sawtooth", 0.1); }
 
   playWarning(): void {
     this.playTone(600, 0.12, "square", 0.12);
@@ -144,14 +139,16 @@ export class AudioManager {
   // ── AI-Generated Obstacle Sound ───────────────────────
   playObstacleSound(soundData: Array<{ wave: string; startHz: number; endHz: number; duration: number; volume: number; delay: number }>): void {
     const ctx = this.ensureContext();
-    if (!ctx) return;
+    if (!ctx || !this.sfxGain) return;
     const now = ctx.currentTime;
-    for (const note of soundData) {
-      const startHz = Math.max(40, Math.min(2000, note.startHz || 200));
-      const endHz = Math.max(40, Math.min(2000, note.endHz || 200));
-      const duration = Math.max(0.02, Math.min(1.5, note.duration || 0.2));
-      const volume = Math.max(0.01, Math.min(0.35, note.volume || 0.15));
-      const delay = Math.max(0, Math.min(1.5, note.delay || 0));
+    // Limit to max 4 notes to prevent audio overload
+    const notes = soundData.slice(0, 4);
+    for (const note of notes) {
+      const startHz = Math.max(50, Math.min(1500, note.startHz || 200));
+      const endHz = Math.max(50, Math.min(1500, note.endHz || startHz));
+      const duration = Math.max(0.05, Math.min(1.0, note.duration || 0.2));
+      const volume = Math.max(0.01, Math.min(0.2, note.volume || 0.1));
+      const delay = Math.max(0, Math.min(1.0, note.delay || 0));
       const startTime = now + delay;
 
       try {
@@ -166,24 +163,26 @@ export class AudioManager {
           g.gain.setValueAtTime(volume, startTime);
           g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
           src.connect(g);
-          g.connect(this.masterGain!);
+          g.connect(this.sfxGain);
           src.start(startTime);
-          src.stop(startTime + duration + 0.01);
+          src.stop(startTime + duration + 0.02);
+          src.onended = () => { try { src.disconnect(); g.disconnect(); } catch {} };
         } else {
           const waveType = (["sine", "square", "sawtooth", "triangle"].includes(note.wave) ? note.wave : "square") as OscillatorType;
           const osc = ctx.createOscillator();
           osc.type = waveType;
           osc.frequency.setValueAtTime(startHz, startTime);
-          if (Math.abs(startHz - endHz) > 5) {
-            osc.frequency.exponentialRampToValueAtTime(endHz, startTime + duration);
+          if (Math.abs(startHz - endHz) > 10) {
+            osc.frequency.exponentialRampToValueAtTime(Math.max(20, endHz), startTime + duration);
           }
           const g = ctx.createGain();
           g.gain.setValueAtTime(volume, startTime);
           g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
           osc.connect(g);
-          g.connect(this.masterGain!);
+          g.connect(this.sfxGain);
           osc.start(startTime);
-          osc.stop(startTime + duration + 0.01);
+          osc.stop(startTime + duration + 0.02);
+          osc.onended = () => { try { osc.disconnect(); g.disconnect(); } catch {} };
         }
       } catch {
         // Silently ignore malformed sound notes
@@ -267,6 +266,8 @@ export class AudioManager {
   destroy(): void {
     this.stopEngine();
     this.stopMusic();
+    this.sfxGain?.disconnect();
+    this.sfxGain = null;
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;
