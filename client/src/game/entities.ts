@@ -777,11 +777,11 @@ export function createRoadState(): RoadState {
     streetlights.push({ x: i * 180 + 50 });
   }
 
-  // Mix of Vietnamese street culture + sponsor/brand neon signs
+  // Mix of Vietnamese street culture + actual hackathon sponsor neon signs
   const SIGN_LABELS = [
     "PHỞ 24", "BIA HƠI", "CÀ PHÊ", "BÚN BÒ", "BÁNH MÌ",
-    "AMANOTES", "OPENAI", "AWS", "COCA-COLA", "VNG",
-    "GRAB", "KARAOKE", "NHÀ HÀNG", "SHOPEE",
+    "OPENAI", "VNG", "HRG", "ELEVENLABS", "FPT",
+    "KARAOKE", "AGORA", "LOVABLE", "CODERSCHOOL",
   ];
   const shopSigns: ShopSign[] = [];
   for (let i = 0; i < 10; i++) {
@@ -820,7 +820,7 @@ export function updateRoad(road: RoadState, baseSpeed: number, dt: number): void
   }
 
   // Neon signs parallax (0.25x)
-  const SIGN_LABELS = ["PHỞ 24","BIA HƠI","CÀ PHÊ","BÚN BÒ","BÁNH MÌ","AMANOTES","OPENAI","AWS","COCA-COLA","VNG","GRAB","KARAOKE","NHÀ HÀNG","SHOPEE"];
+  const SIGN_LABELS = ["PHỞ 24","BIA HƠI","CÀ PHÊ","BÚN BÒ","BÁNH MÌ","OPENAI","VNG","HRG","ELEVENLABS","FPT","KARAOKE","AGORA","LOVABLE","CODERSCHOOL"];
   for (const ss of road.shopSigns) {
     ss.x -= baseSpeed * 0.25 * dt;
     if (ss.x + ss.width < -30) {
