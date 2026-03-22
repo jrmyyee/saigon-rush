@@ -408,17 +408,18 @@ const server = Bun.serve<SocketData>({
         // Broadcast updated vote state
         pub(`audience:${sessionId}`, { type: "vote_update", votes: votables });
 
-        // PHASE 2: Generate detailed sprite via Claude Opus (background, progressive enhancement)
+        // PHASE 2: Claude Opus sprite generation disabled in production — OOMs on 512MB VM
+        // The GPT Phase 1 fallback sprites (8-12 rects) + sprite library provide sufficient visuals
+        // To re-enable: uncomment the block below and use a 1GB+ VM
         const obstacleId = obstacle.id;
-        const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T | undefined> =>
-          Promise.race([promise, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
-
+        /*
         generateDetailedSprite(obstacle).then(async (result) => {
           if (result && result.spriteData.length > 0) {
             pub(`game:${sessionId}`, { type: "obstacle_sprite_ready", obstacleId, obstacleType: obstacle.type, spriteData: result.spriteData });
             console.log(`[phase2] "${obstacle.displayName}" — sprite ready, ${result.spriteData.length} rects${result.segmentSpriteData ? `, body: ${result.segmentSpriteData.length}` : ''}`);
           }
         }).catch(() => {});
+        */
 
         // SFX fires in background too
         generateSoundEffect(obstacle.displayName, obstacle.audienceMessage || "").then((soundEffectAudio) => {
