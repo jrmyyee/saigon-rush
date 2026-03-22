@@ -8,6 +8,7 @@ export type WSMessage =
   | { type: "audience_hello"; name: string }
   | { type: "new_obstacle"; obstacle: GameObstacle }
   | { type: "suggestion_accepted"; original: string; result: GameObstacle; senderName?: string }
+  | { type: "suggestion_queued"; original: string; position: number; label: string }
   | { type: "suggestion_rejected"; reason: string }
   | { type: "game_state"; state: GameState }
   | { type: "player_joined"; role: ClientRole }

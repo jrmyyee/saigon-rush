@@ -44,6 +44,10 @@ export function Audience() {
           color: msg.result.color,
         }, ...f].slice(0, 20));
       }
+      if (msg.type === "suggestion_queued") {
+        setGenerating(false);
+        setFeed((f) => [{ text: msg.original, result: `⏳ ${msg.label} (queued #${msg.position})`, timestamp: Date.now() }, ...f].slice(0, 20));
+      }
       if (msg.type === "suggestion_rejected") {
         setGenerating(false);
         setError(msg.reason);

@@ -25,6 +25,83 @@ interface VotableObstacle { id: string; label: string; color: string; votes: num
 const sessionVotes = new Map<string, VotableObstacle[]>(); // sessionId → obstacles
 const userVotes = new Map<string, Set<string>>(); // odId → set of user IDs who voted
 
+// ── Global obstacle dispatch throttle ─────────────────────
+// Ensures audience obstacles are spaced out for playable gameplay,
+// regardless of how many people are submitting simultaneously.
+// Spacing scales with audience size:
+// 1-5 players: 2s (barely noticeable), 6-15: 3s, 16-30: 4s, 30+: 5s
+function getObstacleSpacing(sessionId: string): number {
+  const session = sessions.get(sessionId);
+  const count = session?.audience.length || 0;
+  if (count <= 5) return 2000;
+  if (count <= 15) return 3000;
+  if (count <= 30) return 4000;
+  return 5000;
+}
+interface QueuedObstacle { obstacle: GameObstacle; senderName?: string; original: string }
+const sessionQueues = new Map<string, QueuedObstacle[]>();
+const sessionLastDispatch = new Map<string, number>();
+const sessionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function dispatchNextInQueue(sessionId: string): void {
+  const queue = sessionQueues.get(sessionId);
+  if (!queue || queue.length === 0) return;
+
+  const { obstacle, senderName, original } = queue.shift()!;
+  sessionLastDispatch.set(sessionId, Date.now());
+
+  // Send to game + audience
+  pub(`game:${sessionId}`, { type: "new_obstacle", obstacle });
+  pub(`audience:${sessionId}`, { type: "suggestion_accepted", original, result: obstacle, senderName });
+
+  // Track votes
+  if (!sessionVotes.has(sessionId)) sessionVotes.set(sessionId, []);
+  const votables = sessionVotes.get(sessionId)!;
+  votables.push({ id: obstacle.id, label: obstacle.label, color: obstacle.color, votes: 0, senderName });
+  if (votables.length > 20) votables.shift();
+  pub(`audience:${sessionId}`, { type: "vote_update", votes: votables });
+
+  console.log(`[dispatch] "${obstacle.displayName}" → game (queue: ${queue.length} remaining)`);
+
+  // Schedule next if queue has more
+  if (queue.length > 0) {
+    const spacing = getObstacleSpacing(sessionId);
+    const tid = setTimeout(() => {
+      sessionTimers.delete(sessionId);
+      dispatchNextInQueue(sessionId);
+    }, spacing);
+    sessionTimers.set(sessionId, tid);
+  }
+}
+
+function enqueueObstacle(sessionId: string, item: QueuedObstacle): void {
+  if (!sessionQueues.has(sessionId)) sessionQueues.set(sessionId, []);
+  const queue = sessionQueues.get(sessionId)!;
+
+  // Cap queue at 10 — drop oldest if full (prevents infinite backlog)
+  if (queue.length >= 10) {
+    const dropped = queue.shift()!;
+    console.log(`[queue] Dropped "${dropped.obstacle.displayName}" — queue full`);
+  }
+  queue.push(item);
+
+  const lastDispatch = sessionLastDispatch.get(sessionId) || 0;
+  const elapsed = Date.now() - lastDispatch;
+  const spacing = getObstacleSpacing(sessionId);
+
+  // If enough time has passed, dispatch immediately. Otherwise schedule.
+  if (elapsed >= spacing && !sessionTimers.has(sessionId)) {
+    dispatchNextInQueue(sessionId);
+  } else if (!sessionTimers.has(sessionId)) {
+    const delay = spacing - elapsed;
+    const tid = setTimeout(() => {
+      sessionTimers.delete(sessionId);
+      dispatchNextInQueue(sessionId);
+    }, delay);
+    sessionTimers.set(sessionId, tid);
+  }
+}
+
 const corsHeaders = (): Record<string, string> => ({
   "Access-Control-Allow-Origin": CLIENT_URL,
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -408,20 +485,17 @@ const server = Bun.serve<SocketData>({
         const phase1Ms = Date.now() - t1;
         console.log(`[phase1] "${obstacle.displayName}" — ${phase1Ms}ms, fallback rects: ${obstacle.spriteData?.length ?? 0}`);
 
-        // SEND IMMEDIATELY after Phase 1 — don't wait for sprite/SFX generation
-        // Obstacle renders with Phase 1 fallback sprite (8-12 rects), then upgrades progressively
-        pub(`game:${sessionId}`, { type: "new_obstacle", obstacle });
+        // Instant feedback to the submitter — "your obstacle is coming"
         const senderName = msg.senderName || undefined;
-        pub(`audience:${sessionId}`, { type: "suggestion_accepted", original: msg.text, result: obstacle, senderName });
+        const queue = sessionQueues.get(sessionId);
+        const queuePos = (queue?.length || 0) + 1;
+        if (queuePos > 1) {
+          // Only show "queued" if there's actually a wait
+          ws.send(JSON.stringify({ type: "suggestion_queued", original: msg.text, position: queuePos, label: obstacle.label }));
+        }
 
-        // Track as votable obstacle
-        if (!sessionVotes.has(sessionId)) sessionVotes.set(sessionId, []);
-        const votables = sessionVotes.get(sessionId)!;
-        votables.push({ id: obstacle.id, label: obstacle.label, color: obstacle.color, votes: 0, senderName });
-        // Keep only last 20 obstacles
-        if (votables.length > 20) votables.shift();
-        // Broadcast updated vote state
-        pub(`audience:${sessionId}`, { type: "vote_update", votes: votables });
+        // Queue obstacle for staggered dispatch (spacing scales with audience size)
+        enqueueObstacle(sessionId, { obstacle, senderName, original: msg.text });
 
         // PHASE 2: Claude Opus sprite generation disabled in production — OOMs on 512MB VM
         // The GPT Phase 1 fallback sprites (8-12 rects) + sprite library provide sufficient visuals
