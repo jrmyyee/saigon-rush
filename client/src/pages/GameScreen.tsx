@@ -36,6 +36,7 @@ export function GameScreen() {
   const [feed, setFeed] = useState<SuggestionFeedItem[]>([]);
   const [audienceCount, setAudienceCount] = useState(0);
   const [allVotes, setAllVotes] = useState<Array<{ id: string; label: string; color: string; votes: number }>>([]);
+  const [joinedPlayers, setJoinedPlayers] = useState<Array<{ name: string; color: string; joinedAt: number }>>([]);
   const [lobbyMusicStarted, setLobbyMusicStarted] = useState(false);
   const wsRef = useRef<ReturnType<typeof createWSClient> | null>(null);
   const lobbyAudioRef = useRef<AudioManager | null>(null);
@@ -91,6 +92,14 @@ export function GameScreen() {
     ws.onMessage((msg: any) => {
       if (msg.type === "audience_count") {
         setAudienceCount(msg.count);
+      }
+      if (msg.type === "audience_joined") {
+        const colors = ["#ff4488", "#44aaff", "#ffaa00", "#00ff88", "#ff6644", "#aa44ff", "#44ffaa", "#ff44cc"];
+        setJoinedPlayers(prev => [...prev, {
+          name: msg.name,
+          color: colors[prev.length % colors.length],
+          joinedAt: Date.now(),
+        }].slice(-20));
       }
       if (msg.type === "input" && gameRef.current) {
         gameRef.current.handleInput(msg.action);
@@ -525,6 +534,27 @@ export function GameScreen() {
                   {sessionId}
                 </span>
               </div>
+
+              {/* Joined players */}
+              {joinedPlayers.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {joinedPlayers.map((p, i) => (
+                    <div key={i} className="flex items-center gap-1 px-2 py-0.5" style={{
+                      background: p.color + "18",
+                      border: `1px solid ${p.color}44`,
+                      animation: "result-slide-up 0.3s ease-out",
+                    }}>
+                      {/* Mini pixel motorbike icon */}
+                      <div style={{ width: 10, height: 8, position: "relative" }}>
+                        <div style={{ position:"absolute", width:4, height:4, background: p.color, left:3, top:0 }} />
+                        <div style={{ position:"absolute", width:3, height:3, background:"#333", left:0, top:5, borderRadius:"50%" }} />
+                        <div style={{ position:"absolute", width:3, height:3, background:"#333", left:7, top:5, borderRadius:"50%" }} />
+                      </div>
+                      <span className="font-pixel" style={{ fontSize:"0.5rem", color: p.color }}>{p.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ── HOW IT WORKS ── */}

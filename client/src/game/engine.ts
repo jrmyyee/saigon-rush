@@ -767,38 +767,79 @@ export function createGame(canvas: HTMLCanvasElement, options?: GameOptions): Ga
       for (let i = 0; i < state.announcements.length; i++) {
         const a = state.announcements[i];
         const progress = 1 - a.timer / a.maxTimer; // 0→1
-        // Slide in from top over 0.3s, hold, fade out last 0.5s
         const slideIn = Math.min(1, progress * (a.maxTimer / 0.3));
         const fadeOut = a.timer < 0.5 ? a.timer / 0.5 : 1;
-        const yOffset = -60 + slideIn * 60 + i * 56;
+        const yOffset = -60 + slideIn * 60 + i * 66;
         ctx.globalAlpha = fadeOut;
-        // Measure description to fit — wrap or truncate
-        ctx.font = "11px monospace";
-        const desc = a.description;
-        const maxDescW = 400;
-        let descLine = desc;
-        if (ctx.measureText(desc).width > maxDescW) {
-          // Truncate with ellipsis at character level
-          let fit = desc;
-          while (fit.length > 10 && ctx.measureText(fit + "...").width > maxDescW) fit = fit.slice(0, -1);
-          descLine = fit + "...";
+
+        // Measure and fit both label and description to banner width
+        const bannerW = 520;
+        const maxTextW = bannerW - 20;
+
+        // Fit label
+        ctx.font = "bold 16px monospace";
+        let labelLine = a.text;
+        if (ctx.measureText(labelLine).width > maxTextW) {
+          while (labelLine.length > 5 && ctx.measureText(labelLine + "...").width > maxTextW) labelLine = labelLine.slice(0, -1);
+          labelLine += "...";
         }
+
+        // Fit description — split into 2 lines if needed
+        ctx.font = "10px monospace";
+        const desc = a.description;
+        const descLines: string[] = [];
+        if (ctx.measureText(desc).width <= maxTextW) {
+          descLines.push(desc);
+        } else {
+          // Word-wrap into max 2 lines
+          const words = desc.split(" ");
+          let line = "";
+          for (const word of words) {
+            const test = line ? line + " " + word : word;
+            if (ctx.measureText(test).width > maxTextW) {
+              if (line) descLines.push(line);
+              line = word;
+              if (descLines.length >= 2) break;
+            } else {
+              line = test;
+            }
+          }
+          if (line && descLines.length < 2) descLines.push(line);
+          // Truncate last line if still too long
+          if (descLines.length > 0) {
+            let last = descLines[descLines.length - 1];
+            if (ctx.measureText(last).width > maxTextW) {
+              while (last.length > 5 && ctx.measureText(last + "...").width > maxTextW) last = last.slice(0, -1);
+              descLines[descLines.length - 1] = last + "...";
+            }
+          }
+        }
+
+        const bannerH = 36 + descLines.length * 13;
+        const bx = CANVAS_W / 2 - bannerW / 2;
+
         // Banner background
         ctx.fillStyle = "#000000cc";
-        ctx.fillRect(CANVAS_W / 2 - 220, 76 + yOffset, 440, 48);
-        // Colored accent bar
+        ctx.fillRect(bx, 76 + yOffset, bannerW, bannerH);
+        // Colored accent bars
         ctx.fillStyle = a.color;
-        ctx.fillRect(CANVAS_W / 2 - 220, 76 + yOffset, 4, 48);
-        ctx.fillRect(CANVAS_W / 2 + 216, 76 + yOffset, 4, 48);
-        // Obstacle name
+        ctx.fillRect(bx, 76 + yOffset, 4, bannerH);
+        ctx.fillRect(bx + bannerW - 4, 76 + yOffset, 4, bannerH);
+        // Top accent line
+        ctx.fillRect(bx + 4, 76 + yOffset, bannerW - 8, 1);
+
+        // Label
         ctx.fillStyle = a.color;
-        ctx.font = "bold 18px monospace";
+        ctx.font = "bold 16px monospace";
         ctx.textAlign = "center";
-        ctx.fillText(a.text, CANVAS_W / 2, 98 + yOffset);
-        // Description
+        ctx.fillText(labelLine, CANVAS_W / 2, 94 + yOffset);
+
+        // Description lines
         ctx.fillStyle = "#ffffff99";
-        ctx.font = "11px monospace";
-        ctx.fillText(descLine, CANVAS_W / 2, 116 + yOffset);
+        ctx.font = "10px monospace";
+        for (let j = 0; j < descLines.length; j++) {
+          ctx.fillText(descLines[j], CANVAS_W / 2, 108 + j * 13 + yOffset);
+        }
         ctx.textAlign = "left";
         ctx.globalAlpha = 1;
       }

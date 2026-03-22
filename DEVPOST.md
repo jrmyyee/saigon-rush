@@ -26,8 +26,6 @@ Games have always been better with a crowd. But usually the crowd can only choos
 
 What if someone types "dragon" and a fire-breathing parade snake blocks two lanes? What if someone types "angry grandma" and she's sitting on a plastic stool throwing slippers at you?
 
-So I built it.
-
 ---
 
 ## What it does

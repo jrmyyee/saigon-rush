@@ -343,6 +343,15 @@ const server = Bun.serve<SocketData>({
     open(ws) {
       const { sessionId, role } = ws.data;
       const session = getOrCreateSession(sessionId);
+
+      // Room size cap — reject audience beyond limit
+      const MAX_AUDIENCE = 50;
+      if (role === "audience" && session.audience.length >= MAX_AUDIENCE) {
+        ws.send(JSON.stringify({ type: "suggestion_rejected", reason: "Room is full! Max 50 players." }));
+        ws.close();
+        return;
+      }
+
       ws.subscribe(`game:${sessionId}`);
 
       if (role === "display") {
@@ -373,6 +382,12 @@ const server = Bun.serve<SocketData>({
       // Controller -> forward input to game topic
       if (role === "controller" && msg.type === "input") {
         pub(`game:${sessionId}`, msg);
+        return;
+      }
+
+      // Audience -> announce name to game screen
+      if (role === "audience" && msg.type === "audience_hello") {
+        pub(`game:${sessionId}`, { type: "audience_joined", name: msg.name || "Rider" });
         return;
       }
 

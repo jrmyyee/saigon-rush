@@ -55,6 +55,13 @@ export function Audience() {
     return () => ws.close();
   }, [sessionId]);
 
+  // Send hello when player enters their name
+  useEffect(() => {
+    if (joined && name.trim() && wsRef.current) {
+      wsRef.current.send({ type: "audience_hello", name: name.trim() });
+    }
+  }, [joined, name]);
+
   useEffect(() => {
     if (cooldown <= 0) return;
     const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);

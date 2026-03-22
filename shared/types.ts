@@ -5,6 +5,7 @@ export type ClientRole = "display" | "controller" | "audience";
 export type WSMessage =
   | { type: "input"; action: InputAction }
   | { type: "suggestion"; text: string; senderName?: string }
+  | { type: "audience_hello"; name: string }
   | { type: "new_obstacle"; obstacle: GameObstacle }
   | { type: "suggestion_accepted"; original: string; result: GameObstacle; senderName?: string }
   | { type: "suggestion_rejected"; reason: string }
@@ -19,7 +20,8 @@ export type WSMessage =
   | { type: "obstacle_sfx_ready"; obstacleId: string; soundEffectAudio: string }
   | { type: "vote"; obstacleId: string }
   | { type: "vote_update"; votes: Array<{ id: string; label: string; color: string; votes: number }> }
-  | { type: "audience_count"; count: number };
+  | { type: "audience_count"; count: number }
+  | { type: "audience_joined"; name: string };
 
 export type InputAction = "lane_up" | "lane_down" | "boost";
 
