@@ -740,6 +740,7 @@ export interface ShopSign {
   y: number;
   width: number;
   color: string;
+  label: string;
 }
 
 export interface RoadState {
@@ -776,13 +777,21 @@ export function createRoadState(): RoadState {
     streetlights.push({ x: i * 180 + 50 });
   }
 
+  // Mix of Vietnamese street culture + sponsor/brand neon signs
+  const SIGN_LABELS = [
+    "PHỞ 24", "BIA HƠI", "CÀ PHÊ", "BÚN BÒ", "BÁNH MÌ",
+    "AMANOTES", "OPENAI", "AWS", "COCA-COLA", "VNG",
+    "GRAB", "KARAOKE", "NHÀ HÀNG", "SHOPEE",
+  ];
   const shopSigns: ShopSign[] = [];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
+    const label = SIGN_LABELS[i % SIGN_LABELS.length];
     shopSigns.push({
-      x: i * 130 + 20 + Math.random() * 40,
-      y: 118 + Math.random() * 20,
-      width: 20 + Math.random() * 20,
+      x: i * 110 + 20 + Math.random() * 30,
+      y: 112 + Math.random() * 22,
+      width: Math.max(30, label.length * 5 + 10),
       color: SIGN_COLORS[Math.floor(Math.random() * SIGN_COLORS.length)],
+      label,
     });
   }
 
@@ -810,13 +819,16 @@ export function updateRoad(road: RoadState, baseSpeed: number, dt: number): void
     }
   }
 
-  // Shop signs parallax (0.25x)
+  // Neon signs parallax (0.25x)
+  const SIGN_LABELS = ["PHỞ 24","BIA HƠI","CÀ PHÊ","BÚN BÒ","BÁNH MÌ","AMANOTES","OPENAI","AWS","COCA-COLA","VNG","GRAB","KARAOKE","NHÀ HÀNG","SHOPEE"];
   for (const ss of road.shopSigns) {
     ss.x -= baseSpeed * 0.25 * dt;
     if (ss.x + ss.width < -30) {
+      const label = SIGN_LABELS[Math.floor(Math.random() * SIGN_LABELS.length)];
       ss.x = CANVAS_W + 20 + Math.random() * 60;
-      ss.width = 20 + Math.random() * 20;
+      ss.width = Math.max(30, label.length * 5 + 10);
       ss.color = SIGN_COLORS[Math.floor(Math.random() * SIGN_COLORS.length)];
+      ss.label = label;
     }
   }
 
@@ -896,18 +908,23 @@ export function drawRoad(ctx: CanvasRenderingContext2D, road: RoadState): void {
     }
   }
 
-  // ── Vietnamese shop signs ──
+  // ── Neon signs (Vietnamese shops + sponsor brands) ──
   for (const ss of road.shopSigns) {
     // Sign background
     ctx.fillStyle = ss.color + "88";
-    ctx.fillRect(ss.x, ss.y, ss.width, 10);
-    // Sign glow
+    ctx.fillRect(ss.x, ss.y, ss.width, 12);
+    // Outer glow
     ctx.fillStyle = ss.color + "18";
-    ctx.fillRect(ss.x - 2, ss.y - 2, ss.width + 4, 14);
-    // "Text" bars on sign
-    ctx.fillStyle = "#ffffff55";
-    ctx.fillRect(ss.x + 3, ss.y + 3, ss.width * 0.6, 2);
-    ctx.fillRect(ss.x + 3, ss.y + 6, ss.width * 0.4, 1);
+    ctx.fillRect(ss.x - 3, ss.y - 3, ss.width + 6, 18);
+    // Inner glow
+    ctx.fillStyle = ss.color + "30";
+    ctx.fillRect(ss.x - 1, ss.y - 1, ss.width + 2, 14);
+    // Neon text
+    ctx.fillStyle = ss.color;
+    ctx.font = "bold 7px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(ss.label, ss.x + ss.width / 2, ss.y + 9);
+    ctx.textAlign = "left";
   }
 
   // ── Streetlights ──
