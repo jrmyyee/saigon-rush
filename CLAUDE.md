@@ -14,6 +14,15 @@
 - Write detailed specs upfront to reduce ambiguity
 - Reference `task_plan.md` before starting any phase
 
+### 1b. Understand Before Changing
+- Before ANY code changes, build a full understanding of every file the plan touches
+- Read the complete file, not just the target lines — understand surrounding context, callers, and dependents
+- Trace the data flow end-to-end: where does the value originate, how does it propagate, what consumes it?
+- Identify implicit contracts: if a function returns a format (e.g. `"data:image/png;..."`), find every consumer that depends on that format
+- Cross-check the plan against reality: do the line numbers match? Do the old values match? Are there other references the plan missed?
+- Flag discrepancies or risks to the user BEFORE writing code — a corrected plan costs nothing, a corrected implementation costs time and tech debt
+- Ask: "What could this change break that isn't mentioned in the plan?" If the answer is non-empty, surface it.
+
 ### 2. Subagent Strategy
 - Use SPECIALIZED agents, not generic ones:
   - `feature-dev:code-explorer` for understanding codebase before changes

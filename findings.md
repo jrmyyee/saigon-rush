@@ -105,15 +105,81 @@ Design a Vietnamese-flavored result screen — shareable, contains a QR code to 
 
 ## Technical Research Findings
 
-### duck.baby Analysis (Completed)
-- React 19.1.1 + Vite + Tailwind CSS v4.1.14
-- Custom Canvas 2D engine (960x704), no game framework
-- ALL pixel art drawn procedurally via fillRect (96 calls, 39 game-related)
-- ALL audio synthesized via Web Audio API (square + sawtooth oscillators, white noise)
-- Zero external game assets — everything is code
-- tRPC + TanStack Query for backend
-- Deployed on Vercel, assets on CloudFront
-- Built with Manus AI assistance
+### duck.baby / Cruise Buffet Chaos — Deep Analysis (Mar 21, 2026)
+
+**URL**: https://www.duck.baby/
+**Game**: Top-down dodge-and-collect arcade — survive the buffet line, collect all food
+**Stack**: React + Vite + Tailwind CSS + Canvas 2D (960x704) — identical to Saigon Rush
+
+#### Visual Design Techniques (steal these)
+
+**CSS Scanlines (zero canvas cost)**:
+```css
+.scanlines::after {
+  content: "";
+  pointer-events: none;
+  z-index: 100;
+  background: repeating-linear-gradient(0deg, transparent 0, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+  position: absolute;
+  inset: 0;
+}
+```
+We draw scanlines per-frame in canvas. They do it in CSS for free. Should migrate.
+
+**Green Neon Canvas Border**: `border-2 border-green-500/40` with glow `shadow-[0_0_40px_rgba(0,255,0,0.15)]`
+
+**Color Palette**: Dark blue floor tiles (rgb(42,58,92) / rgb(36,50,82)), vivid sprite colors on dark bg, green + yellow text
+
+**`image-rendering: pixelated`** on canvas CSS — crisp pixel art scaling
+
+**Fonts**: Press Start 2P (pixel/retro), Nunito (UI), Space Grotesk (body)
+
+#### Game Design Patterns
+
+- **Wave system**: "WAVE 1" — structured escalation
+- **Clear objective**: "GET TO THE BUFFET!" in large yellow pixel text, center screen
+- **HUD**: Timer (1:29 countdown), WAVE, HP bar, SCORE, Food counter (0/5), control hints at bottom
+- **Character sprites**: ~16x20px, minimal but distinct — colored shirt + skin head + hair = instant readability
+- **Buffet stations**: Named food stations around edges with rope barriers (environmental storytelling)
+- **Controls hint**: "WASD/ARROWS: MOVE | SPACE/E: PUSH | COLLECT ALL FOOD BEFORE TIME RUNS OUT!" at bottom
+
+#### Music & Audio (HIGH QUALITY — reverse engineered)
+
+**100% procedural** — zero audio files loaded. All Web Audio API synthesis. Same approach as us but much higher production value.
+
+**Captured data**: 200 oscillators in 3 seconds. 158 square + 41 triangle + 1 sine.
+
+**Key technique — OCTAVE-DOUBLED NOTES**:
+Every melody note plays TWO square wave oscillators simultaneously — one at the note frequency, one an OCTAVE below. Example: F5 (698Hz) + F4 (349Hz) at the same time. This creates a dramatically richer, fuller chiptune sound compared to single oscillators (what we do).
+
+**Music structure**:
+- ~175 BPM effective (85ms average between notes)
+- Key: Bb major / G minor (C, D, Eb, E, F, G, Ab, Bb scale degrees)
+- Opening riff: fast descending F5→Eb5→C5→Bb4→C5→Bb4→Ab4→G4 (exciting cascade)
+- Bass: triangle waves at C2/D2 (deep sub-bass)
+- Dense scheduling: notes every 85ms = constant musical texture
+- Pattern: melody pairs + bass interludes + descending runs
+
+**What makes it sound good**:
+1. Octave doubling (richness)
+2. Fast note density (energy)
+3. Descending cascading runs (excitement)
+4. Triangle bass at very low frequencies (foundation/weight)
+5. Square waves for melody (classic chiptune character)
+
+**Actionable for Saigon Rush**: Our `playVibratoTone` and `playTone` each create a single oscillator. Should add octave doubling — play a second square wave at `freq/2` alongside every lead note. Minimal code change, massive sound improvement.
+
+#### Actionable Takeaways for Saigon Rush
+
+| Priority | Action | Impact |
+|---|---|---|
+| **HIGH** | Move scanlines from canvas to CSS `::after` pseudo-element | Free perf, same visual |
+| **HIGH** | Add green neon border glow to canvas element | Instant retro polish |
+| **HIGH** | Study their music and match quality level | User priority |
+| **MEDIUM** | Add objective text at game start ("SURVIVE THE TRAFFIC!") | Instant comprehension |
+| **MEDIUM** | Add control hints at bottom of screen | First-time player UX |
+| **LOW** | Consider wave markers at 15s/30s/45s | Structure + escalation |
+| **LOW** | Add branding watermark in corner | Professional touch |
 
 ### WebSocket Architecture (Finalized)
 

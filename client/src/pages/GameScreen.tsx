@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { createWSClient } from "../lib/ws";
 import { createGame } from "../game/engine";
 import { AudioManager } from "../game/audio";
-import type { GameStats, SuggestionFeedItem, WSMessage } from "@shared/types";
+import type { GameStats, SuggestionFeedItem } from "@shared/types";
 import type { GameAPI } from "../game/engine";
 
 function SpritePreview({ spriteData }: { spriteData: SuggestionFeedItem['spriteData'] }) {

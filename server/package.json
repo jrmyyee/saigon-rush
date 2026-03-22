@@ -7,6 +7,7 @@
     "start": "bun run index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.81",
     "@fal-ai/client": "^1.9.4",
     "elevenlabs": "^1.59.0",
     "openai": "^4.73.0"

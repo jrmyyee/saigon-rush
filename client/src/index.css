@@ -25,3 +25,20 @@ body {
   width: 100vw;
   height: 100vh;
 }
+
+/* CRT scanlines overlay — zero canvas cost, pure CSS (from duck.baby) */
+.scanlines {
+  position: relative;
+}
+.scanlines::after {
+  content: "";
+  pointer-events: none;
+  z-index: 100;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px, transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px, rgba(0, 0, 0, 0.08) 4px
+  );
+  position: absolute;
+  inset: 0;
+}

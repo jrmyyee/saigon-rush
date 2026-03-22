@@ -10,10 +10,8 @@ export class AudioManager {
   private musicTimeouts: number[] = [];
   private activeTimeouts: Set<number> = new Set(); // Track scheduled cleanups for emergency teardown
 
-  // ── Putt-putt engine state ──────────────────────────────
+  // ── Engine state ──────────────────────────────────────────
   private engineTimerId: number | null = null;
-  private engineFreq = 85;
-  private engineVol = 0.04;
 
   // ── Music state ─────────────────────────────────────────
   private musicSpeedMultiplier = 1.0;
@@ -60,9 +58,8 @@ export class AudioManager {
     this.engineRunning = false;
   }
 
-  setEngineSpeed(speed: number): void {
-    this.engineFreq = 80 + (speed / 800) * 60;
-    this.engineVol = Math.min(0.10, 0.04 + (speed / 800) * 0.06);
+  setEngineSpeed(_speed: number): void {
+    // No-op — engine sound disabled, but method kept for API compatibility
   }
 
   // ── SFX ───────────────────────────────────────────────
@@ -812,7 +809,7 @@ export class AudioManager {
 
     // Slow, mournful Vietnamese melody — the dreamy version
     const C4 = 261.63, D4 = 293.66, F4 = 349.23, G4 = 392.00, Bb4 = 466.16;
-    const C3 = 130.81, F3 = 174.61;
+    const C3 = 130.81, F3 = 174.61, Bb3 = 233.08;
 
     // Descending lament — slow and spacious
     setTimeout(() => this.playVibratoTone(Bb4, 0.8, 0.06), 300);
